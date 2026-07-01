@@ -12,9 +12,9 @@
 
 </p>
 
-# PyPulseq: A Python Package for MRI Pulse Sequence Design
+# PyPulseq-Matlab-like: A PyPython package strongly aligned to the Pulseq-Matlab version
 
-## PyPulseq (v1.5.0) is compatible with all Pulseq interpreter sequences with version >= 1.5.0. The new features introduced with Pulseq 1.5.1 are not yet supported, but will be added in the near future. 
+This project was create to bridge the gap between the *original* Pulseq implementation in Matlab and its Python counterpart. It currently implements all v1.5.1 Pulseq features. This project has a temporarily and experimental nature and serves a possible step towards achieving a better compatibility between two projects. The long term goal is to transition to PyPulseq fully.
 
 ## Table of contents 🧾
 
