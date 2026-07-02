@@ -1,4 +1,4 @@
-from typing import Literal, Tuple
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,14 +8,14 @@ from pypulseq import eps
 
 def paper_plot(
     seq,
-    time_range: Tuple[float] = (0, np.inf),
+    block_range: Tuple[float] = (1, np.inf),
     line_width: float = 1.2,
     axes_color: Tuple[float] = (0.5, 0.5, 0.5),
     rf_color: str = 'black',
     gx_color: str = 'blue',
     gy_color: str = 'red',
     gz_color: Tuple[float] = (0, 0.5, 0.3),
-    rf_plot: Literal['abs', 'real', 'imag'] = 'abs',
+    rf_plot: str = 'abs',
 ):
     """
     Plot sequence using paper-style formatting (minimalist, high-contrast layout).
@@ -24,9 +24,8 @@ def paper_plot(
     ----------
     seq : Sequence
         The Pulseq sequence object to plot.
-    time_range : iterable, default=(0, np.inf)
-        Time range (x-axis limits) for plotting the sequence.
-        Default is 0 to infinity (entire sequence).
+    block_range : iterable, default=(1, np.inf)
+        1-based inclusive block range to plot.
     line_width : float, default=1.2
         Line width used in plots.
     axes_color : color, default=(0.5, 0.5, 0.5)
@@ -40,13 +39,18 @@ def paper_plot(
     gz_color : color, default=(0, 0.5, 0.3)
         Color for gradient Z waveform.
     rf_plot : {'abs', 'real', 'imag'}, default='abs'
-        Determines how to plot the RF waveforms.
-        If 'abs', plots magnitude for all RF events.
-        If 'real' or 'imag', plots the respective component for all RF events.
+        Determines how to plot RF waveforms (magnitude, real or imaginary part).
 
     """
+    if len(block_range) != 2:
+        raise ValueError("block_range must contain exactly two numbers")
+    block_range = [int(block_range[0]), block_range[1]]
+    if not np.isfinite(block_range[1]):
+        block_range[1] = len(seq.block_events)
+    block_range[1] = int(block_range[1])
+
     # Get waveform data
-    wave_data, _, _, t_adc, _ = seq.waveforms_and_times(append_RF=True, time_range=time_range)
+    wave_data, _, _, t_adc, _, _ = seq.waveforms_and_times(append_RF=True, blockRange=block_range)
 
     # Max amplitudes for scaling
     if wave_data[0].size + wave_data[1].size + wave_data[2].size:
@@ -130,3 +134,5 @@ def paper_plot(
     # Link X-axes (time axis)
     for ax in axes[1:]:
         ax.sharex(axes[0])
+
+    return fig

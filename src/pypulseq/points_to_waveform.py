@@ -23,8 +23,8 @@ def points_to_waveform(amplitudes: np.ndarray, grad_raster_time: float, times: n
     amplitudes = np.asarray(amplitudes)
     times = np.asarray(times)
 
-    if amplitudes.size == 0:
-        return np.array([0])
+    if amplitudes.size == 0 or times.size == 0:
+        return np.array([])
 
     grd = (
         np.arange(

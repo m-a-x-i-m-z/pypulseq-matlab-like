@@ -1,15 +1,15 @@
+import os
 import re
 from typing import Tuple
 
 
 def readasc(filename: str) -> Tuple[dict, dict]:
     """
-    Read a Siemens ASC ASCII-formatted text file.
-
-    The file is parsed into nested dictionaries/lists according to the field name.
-    For example, a line like ``a[0].b[2][3].c = "string"`` is parsed into::
-
-        asc['a'][0]['b'][2][3]['c'] = "string"
+    Reads Siemens ASC ascii-formatted textfile and returns a dictionary
+    structure.
+    E.g. a[0].b[2][3].c = "string"
+    parses into:
+      asc['a'][0]['b'][2][3]['c'] = "string"
 
     Parameters
     ----------
@@ -22,105 +22,84 @@ def readasc(filename: str) -> Tuple[dict, dict]:
         Dictionary of ASC part of file.
     extra : dict
         Dictionary of other fields after "ASCCONV END"
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
-    RuntimeError
-        If a line contains an assignment but cannot be parsed.
     """
+    def _set_nested(base: dict, field_name: str, value):
+        tokens = []
+        for part in field_name.split('.'):
+            m = re.match(r'^([A-Za-z0-9_]+)', part)
+            if m is None:
+                raise RuntimeError(f'Invalid ASC field segment: {part}')
+            tokens.append(m.group(1))
+            for idx in re.findall(r'\[(\d+)\]', part):
+                tokens.append(int(idx))
+
+        d = base
+        for token in tokens[:-1]:
+            if token not in d or not isinstance(d[token], dict):
+                d[token] = {}
+            d = d[token]
+        d[tokens[-1]] = value
+
+    def _parse_value(field_name: str, raw_value: str):
+        v = raw_value.strip()
+        if '"' in v:
+            v = v.replace('"', '')
+        if len(v) >= 2 and ((v[0] == "'" and v[-1] == "'")):
+            v = v[1:-1]
+
+        if v.lower().startswith('0x') and 'atImagedNucleus' not in field_name:
+            try:
+                return int(v[2:], 16)
+            except ValueError:
+                pass
+
+        if re.fullmatch(r'[+-]?\d+', v):
+            return int(v)
+
+        if re.fullmatch(r'[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?', v):
+            return float(v)
+
+        return v
+
     asc, extra = {}, {}
+    base_path, ext = os.path.splitext(filename)
+    input_files = [filename]
+    safety_file = f'{base_path}_GSWD_SAFETY{ext}'
+    if os.path.exists(safety_file):
+        input_files.append(safety_file)
 
-    # Read asc file and convert it into a dictionary structure
-    with open(filename, 'r', encoding='utf-8') as fp:
-        end_of_asc = False
+    # Read asc file(s) and convert into nested dictionaries.
+    for current_file in input_files:
+        with open(current_file, 'r', encoding='utf-8', errors='ignore') as fp:
+            end_of_asc = False
 
-        for next_line in fp:
-            next_line = next_line.strip()
+            for next_line in fp:
+                next_line = next_line.strip()
 
-            if next_line == '### ASCCONV END ###':  # find end of mrProt in the asc file
-                end_of_asc = True
+                if next_line == '### ASCCONV END ###':
+                    end_of_asc = True
+                    continue
 
-            if next_line == '' or next_line[0] == '#':
-                continue
+                if next_line == '' or next_line[0] == '#':
+                    continue
 
-            # regex wizardry: Matches lines like 'a[0].b[2][3].c = "string" # comment'
-            # Note this assumes correct formatting, e.g. does not check whether
-            # brackets match.
-            # modified regex to include hexadecimal shapes
-            match = re.match(
-                r'^\s*([a-zA-Z0-9\[\]\._]+)\s*\=\s*(("[^"]*"|\'[^\']\')|(0x[0-9A-Fa-f]+)|(\d+)|([0-9\.e\-]+))\s*((#|\/\/)(.*))?$',
-                next_line,
-            )
+                if '=' not in next_line:
+                    continue
 
-            if match:
-                field_name = match[1]
+                field_name, raw_value = next_line.split('=', 1)
+                field_name = field_name.strip()
+                raw_value = raw_value.strip()
 
-                # Keep track of where to put the value: base[assign_to] = value
-                if end_of_asc:
-                    base = extra
-                else:
-                    base = asc
+                # MATLAB readasc strips comments after '#' or '//' on the
+                # right-hand side before value conversion.
+                comments = [i for i in (raw_value.find('#'), raw_value.find('//')) if i >= 0]
+                if comments:
+                    raw_value = raw_value[: min(comments)].rstrip()
 
-                assign_to = None
+                if field_name == '':
+                    continue
 
-                # Iterate over every segment of the field name
-                parts = field_name.split('.')
-                for p in parts:
-                    # Update base so final assignment is like: base[assign_to][p] = value
-                    if assign_to is not None and assign_to not in base:
-                        base[assign_to] = {}
-                    if assign_to is not None:
-                        base = base[assign_to]
-
-                    # Iterate over brackets
-                    start = p.find('[')
-                    if start != -1:
-                        name = p[:start]
-                        assign_to = name
-
-                        while start != -1:
-                            stop = p.find(']', start)
-                            index = int(p[start + 1 : stop])
-
-                            # Update base so final assignment is like: base[assign_to][p][index] = value
-                            if assign_to not in base:
-                                base[assign_to] = {}
-                            base = base[assign_to]
-                            assign_to = index
-
-                            start = p.find('[', stop)
-                    else:
-                        assign_to = p
-
-                # Depending on which regex section matched we can infer the value type
-                if match[3]:
-                    base[assign_to] = match[3][1:-1]
-                elif match[4]:  # hex
-                    try:
-                        base[assign_to] = int(match[4], 16)
-                    except ValueError as e:
-                        raise RuntimeError(
-                            f'Bug: ASC line with an assignment was not parsed correctly: {next_line}'
-                        ) from e
-                elif match[5]:  # int
-                    try:
-                        base[assign_to] = int(match[5])
-                    except ValueError as e:
-                        raise RuntimeError(
-                            f'Bug: ASC line with an assignment was not parsed correctly: {next_line}'
-                        ) from e
-                elif match[6]:  # float
-                    try:
-                        base[assign_to] = float(match[6])
-                    except ValueError as e:
-                        raise RuntimeError(
-                            f'Bug: ASC line with an assignment was not parsed correctly: {next_line}'
-                        ) from e
-                else:
-                    raise RuntimeError('This should not be reached')
-            elif next_line.find('=') != -1:
-                raise RuntimeError(f'Bug: ASC line with an assignment was not parsed correctly: {next_line}')
+                target = extra if end_of_asc else asc
+                _set_nested(target, field_name, _parse_value(field_name, raw_value))
 
     return asc, extra

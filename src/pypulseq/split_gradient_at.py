@@ -1,6 +1,7 @@
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Tuple, Union
+from warnings import warn
 
 import numpy as np
 
@@ -31,7 +32,7 @@ def split_gradient_at(
     grad : SimpleNamespace
         Gradient event to be split into two gradient events.
     time_point : float
-        Time point in seconds (s) at which `grad` will be split into two gradient waveforms.
+        Time point at which `grad` will be split into two gradient waveforms.
     system : Opts, default=Opts()
         System limits.
 
@@ -48,35 +49,60 @@ def split_gradient_at(
     if system is None:
         system = Opts.default
 
+    if hasattr(grad, 'id'):
+        raise ValueError(
+            'split_gradient_at() was passed a gradient with an id field. Split gradients before registration or remove the id field.'
+        )
+
     # copy() to emulate pass-by-value; otherwise passed grad is modified
     grad = deepcopy(grad)
 
     grad_raster_time = system.grad_raster_time
 
+    # MATLAB parity: snap split point to gradient raster only
     time_index = round(time_point / grad_raster_time)
-    # Work around floating-point arithmetic limitation
-    time_point = round(time_index * grad_raster_time, 6)
+    if abs(time_point - time_index * grad_raster_time) > 1e-6:
+        warn(
+            'splitting the gradient at a point that is not on a gradient raster edge, substantial rounding is applied',
+            stacklevel=2,
+        )
+    time_point = time_index * grad_raster_time
     channel = grad.channel
 
     if grad.type == 'grad':
         # Check if we have an arbitrary gradient or an extended trapezoid
-        if abs(grad.tt[-1] - 0.5 * grad_raster_time) < 1e-10 and np.all(
-            abs(grad.tt[1:] - grad.tt[:-1] - grad_raster_time) < 1e-10
-        ):
-            # Arbitrary gradient -- trivial conversion
-            # If time point is out of range we have nothing to do
-            if time_index == 0 or time_index >= len(grad.tt):
-                return grad
-            else:
-                grad1 = grad
-                grad2 = grad
-                grad1.last = 0.5 * (grad.waveform[time_index - 1] + grad.waveform[time_index])
+        if abs(grad.tt[0] - 0.5 * grad_raster_time) < 1e-10:
+            is_arb = np.all(abs(grad.tt[1:] - grad.tt[:-1] - grad_raster_time) < 1e-10)
+            is_arb_os = np.all(abs(grad.tt[1:] - grad.tt[:-1] - grad_raster_time * 0.5) < 1e-10)
+            if is_arb or is_arb_os:
+                # MATLAB convention for this branch uses 1-based index
+                time_index_mat = time_index + 1
+                if is_arb_os:
+                    time_index_mat = (time_index_mat - 1) * 2
+
+                # If time point is out of range we have nothing to do
+                if time_index_mat == 1 or time_index_mat >= len(grad.tt):
+                    return grad
+
+                grad1 = deepcopy(grad)
+                grad2 = deepcopy(grad)
+                if is_arb_os:
+                    grad1.last = grad.waveform[time_index_mat - 1]
+                else:
+                    grad1.last = 0.5 * (grad.waveform[time_index_mat - 2] + grad.waveform[time_index_mat - 1])
                 grad2.first = grad1.last
-                grad2.delay = grad.delay + grad.t[time_index]
-                grad1.t = grad.t[:time_index]
-                grad1.waveform = grad.waveform[:time_index]
-                grad2.t = grad.t[time_index:] - time_point
-                grad2.waveform = grad.waveform[time_index:]
+                grad2.delay = grad.delay + time_point
+                grad1.tt = grad.tt[: time_index_mat - 1]
+                grad1.waveform = grad.waveform[: time_index_mat - 1]
+                if is_arb_os:
+                    grad2.tt = grad.tt[time_index_mat:] - time_point
+                    grad2.waveform = grad.waveform[time_index_mat:]
+                else:
+                    grad2.tt = grad.tt[time_index_mat - 1 :] - time_point
+                    grad2.waveform = grad.waveform[time_index_mat - 1 :]
+
+                grad1.shape_dur = grad1.tt[-1] - grad1.tt[0] + grad_raster_time
+                grad2.shape_dur = grad2.tt[-1] - grad2.tt[0] + grad_raster_time
 
                 if trace_enabled():
                     t = trace()
@@ -84,10 +110,10 @@ def split_gradient_at(
                     grad2.trace = t
 
                 return grad1, grad2
-        else:
-            # Extended trapezoid
-            times = grad.tt
-            amplitudes = grad.waveform
+
+        # Extended trapezoid
+        times = grad.tt
+        amplitudes = grad.waveform
     elif grad.type == 'trap':
         grad.delay = round(grad.delay / grad_raster_time) * grad_raster_time
         grad.rise_time = round(grad.rise_time / grad_raster_time) * grad_raster_time
@@ -116,13 +142,13 @@ def split_gradient_at(
     # If the split line goes through the delay
     if time_point < grad.delay:
         times = np.concatenate(([0], grad.delay + times))
-        amplitudes = [0, amplitudes]
+        amplitudes = np.concatenate(([0], amplitudes))
         grad.delay = 0
     else:
         time_point -= grad.delay
 
     amplitudes = np.array(amplitudes)
-    times = np.array(times).round(6)  # Work around floating-point arithmetic limitation
+    times = np.array(times)
 
     # Sample at time point
     amp_tp = np.interp(x=time_point, xp=times, fp=amplitudes)
@@ -148,7 +174,7 @@ def split_gradient_at(
         amplitudes=amplitudes2,
         skip_check=True,
     )
-    grad2.delay = time_point
+    grad2.delay = time_point + grad.delay
 
     if trace_enabled():
         t = trace()

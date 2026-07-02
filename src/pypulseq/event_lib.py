@@ -9,6 +9,7 @@ except ImportError:
     Self = TypeVar('Self', bound='EventLibrary')
 
 import math
+import numbers
 
 import numpy as np
 
@@ -38,11 +39,24 @@ class EventLibrary:
     """
 
     def __init__(self, numpy_data=False):
+        self.keys = {}
         self.data = {}
+        self.lengths = {}
         self.type = {}
         self.keymap = {}
+        self.lookup_key = lambda key, fallback=0: self.keymap.get(key, fallback)
         self.next_free_ID = 1
         self.numpy_data = numpy_data
+
+    def _key_from_data(self, new_data: np.ndarray | list) -> str:
+        """
+        Build a key for event lookup. For numpy_data libraries, match MATLAB's
+        sprintf('%.6g ', data) behavior to align duplicate detection.
+        """
+        if self.numpy_data:
+            data = np.asarray(new_data).ravel()
+            return ' '.join(f'{x:.6g}' if isinstance(x, numbers.Number) else str(x) for x in data)
+        return tuple(new_data)
 
     def __str__(self) -> str:
         s = 'EventLibrary:'
@@ -66,14 +80,10 @@ class EventLibrary:
         found : bool
             If `new_data` was found in the event library or not.
         """
-        if self.numpy_data:
-            new_data = np.asarray(new_data)
-            key = new_data.tobytes()
-        else:
-            key = tuple(new_data)
+        key = self._key_from_data(new_data)
 
-        if key in self.keymap:
-            key_id = self.keymap[key]
+        key_id = self.lookup_key(key, 0)
+        if key_id != 0:
             found = True
         else:
             key_id = self.next_free_ID
@@ -105,12 +115,10 @@ class EventLibrary:
         if self.numpy_data:
             new_data = np.asarray(new_data)
             new_data.flags.writeable = False
-            key = new_data.tobytes()
-        else:
-            key = tuple(new_data)
+        key = self._key_from_data(new_data)
 
-        if key in self.keymap:
-            key_id = self.keymap[key]
+        key_id = self.lookup_key(key, 0)
+        if key_id != 0:
             found = True
         else:
             key_id = self.next_free_ID
@@ -118,6 +126,8 @@ class EventLibrary:
 
             # Insert
             self.data[key_id] = new_data
+            self.keys[key_id] = key_id
+            self.lengths[key_id] = len(new_data)
 
             if data_type != str():
                 self.type[key_id] = data_type
@@ -156,11 +166,11 @@ class EventLibrary:
         if self.numpy_data:
             new_data = np.asarray(new_data)
             new_data.flags.writeable = False
-            key = new_data.tobytes()
-        else:
-            key = tuple(new_data)
+        key = self._key_from_data(new_data)
 
         self.data[key_id] = new_data
+        self.keys[key_id] = key_id
+        self.lengths[key_id] = len(new_data)
         if data_type != str():
             self.type[key_id] = data_type
 
@@ -183,9 +193,10 @@ class EventLibrary:
         dict
         """
         return {
-            'key': key_id,
+            'key': self.keys.get(key_id, key_id),
             'data': self.data[key_id],
-            'type': self.type[key_id],
+            'length': self.lengths.get(key_id, len(self.data[key_id])),
+            'type': self.type.get(key_id, str()),
         }
 
     def out(self, key_id: int) -> SimpleNamespace:
@@ -203,16 +214,17 @@ class EventLibrary:
         out : SimpleNamespace
         """
         out = SimpleNamespace()
-        out.key = key_id
+        out.key = self.keys.get(key_id, key_id)
         out.data = self.data[key_id]
-        out.type = self.type[key_id]
+        out.length = self.lengths.get(key_id, len(self.data[key_id]))
+        out.type = self.type.get(key_id, str())
 
         return out
 
     def update(
         self,
         key_id: int,
-        old_data: Union[np.ndarray, None],  # noqa: ARG002
+        old_data: Union[np.ndarray, None],
         new_data: np.ndarray,
         data_type: str = str(),
     ):
@@ -224,8 +236,15 @@ class EventLibrary:
         new_data : numpy.ndarray
         data_type : str, default=str()
         """
-        if key_id in self.data and self.data[key_id] in self.keymap:
-            del self.keymap[self.data[key_id]]
+        if old_data is not None:
+            old_key = self._key_from_data(old_data)
+        elif key_id in self.data:
+            old_key = self._key_from_data(self.data[key_id])
+        else:
+            old_key = None
+
+        if old_key is not None and old_key in self.keymap:
+            del self.keymap[old_key]
 
         self.insert(key_id, new_data, data_type)
 
@@ -272,25 +291,44 @@ class EventLibrary:
             in the new library.
         """
 
+        def round_value(value, digit):
+            if not isinstance(value, numbers.Number):
+                return value
+            return round(value, digit - math.ceil(math.log10(abs(value) + 1e-12)) if digit > 0 else -digit)
+
         def round_data(data: Tuple[float], digits: Tuple[int]) -> Tuple[float]:
             """
             Round the data tuple to a specified number of significant digits,
             specified by `digits`. Rounding behavior is similar to the {.Ng}
             format specifier if N > 0, and similar to {.0f} otherwise.
             """
-            return tuple(
-                round(d, dig - math.ceil(math.log10(abs(d) + 1e-12)) if dig > 0 else -dig)
-                for d, dig in zip(data, digits, strict=False)
-            )
+            rounded = [round_value(d, dig) for d, dig in zip(data, digits, strict=False)]
+            if len(data) > len(rounded):
+                rounded.extend(data[len(rounded):])
+            return tuple(rounded)
 
-        def round_data_numpy(data: np.ndarray, digits: int) -> np.ndarray:
+        def round_data_numpy(data: np.ndarray, digits: Union[int, Tuple[int]]) -> np.ndarray:
             """
             Round the data array to a specified number of significant digits,
             specified by `digits`. Rounding behavior is similar to the {.Ng}
             format specifier if N > 0, and similar to {.0f} otherwise.
             """
-            mags = 10 ** (digits - (np.ceil(np.log10(abs(data) + 1e-12))) if digits > 0 else -digits)
-            result = np.round(data * mags) / mags
+            if isinstance(digits, (tuple, list)):
+                # Handle element-wise rounding if digits is a tuple/list
+                # Only use as many digits as there are data points (matching strict=False behavior)
+                n = min(len(data), len(digits))
+                result_data = np.array(
+                    [round_value(d, dig) for d, dig in zip(data[:n], digits[:n], strict=False)],
+                    dtype=object if data.dtype.kind in 'OUS' else data.dtype,
+                )
+                if len(data) > n:
+                    result = np.concatenate([result_data, data[n:]])
+                else:
+                    result = result_data
+            else:
+                mags = 10 ** (digits - (np.ceil(np.log10(abs(data) + 1e-12))) if digits > 0 else -digits)
+                result = np.round(data * mags) / mags
+            
             result.flags.writeable = False
             return result
 

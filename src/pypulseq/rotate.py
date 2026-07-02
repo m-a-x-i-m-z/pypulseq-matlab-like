@@ -4,8 +4,10 @@ from typing import List, Union
 import numpy as np
 
 from pypulseq.add_gradients import add_gradients
+from pypulseq.block_to_events import block_to_events
 from pypulseq.opts import Opts
 from pypulseq.scale_grad import scale_grad
+from pypulseq.utils.event_helpers import copy_without_id
 from pypulseq.utils.tracing import trace, trace_enabled
 
 
@@ -13,7 +15,6 @@ def __get_grad_abs_mag(grad: SimpleNamespace) -> np.ndarray:
     if grad.type == 'trap':
         return abs(grad.amplitude)
     return np.max(np.abs(grad.waveform))
-
 
 def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, None] = None) -> List[SimpleNamespace]:
     """
@@ -27,7 +28,7 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
     axis : str
         Axis about which the gradient(s) will be rotated.
     angle : float
-        Angle in radians (rad) by which the gradient(s) will be rotated.
+        Angle by which the gradient(s) will be rotated.
     args : SimpleNamespace
         Gradient(s).
 
@@ -39,7 +40,20 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
     if system is None:
         system = Opts.default
 
+    if not np.isscalar(angle):
+        raise ValueError('Rotation angle needs to be a scalar value.')
+
     axes = ['x', 'y', 'z']
+    if axis not in axes:
+        raise ValueError('Incorrect axes specification.')
+
+    va: Union[List[SimpleNamespace], tuple]
+    if len(args) == 1 and hasattr(args[0], 'rf'):
+        va = block_to_events(*args)
+    elif len(args) == 1 and isinstance(args[0], (list, tuple)):
+        va = args[0]
+    else:
+        va = args
 
     # Cycle through the objects and rotate gradients non-parallel to the given rotation axis. Rotated gradients
     # assigned to the same axis are then added together.
@@ -51,11 +65,14 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
 
     axes.remove(axis)
     axes_to_rotate = axes
+    if axis == 'y':
+        # Preserve rotation handedness to match MATLAB behavior
+        axes_to_rotate = axes_to_rotate[::-1]
     if len(axes_to_rotate) != 2:
         raise ValueError('Incorrect axes specification.')
 
-    for i in range(len(args)):
-        event = args[i]
+    for i in range(len(va)):
+        event = va[i]
 
         if (event.type != 'grad' and event.type != 'trap') or event.channel == axis:
             i_bypass.append(i)
@@ -74,7 +91,7 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
     rotated2 = []
     max_mag = 0  # Measure of relevant amplitude
     for i in range(len(i_rotate1)):
-        g = args[i_rotate1[i]]
+        g = copy_without_id(va[i_rotate1[i]])
         max_mag = max(max_mag, __get_grad_abs_mag(g))
         rotated1.append(scale_grad(grad=g, scale=np.cos(angle)))
         g = scale_grad(grad=g, scale=np.sin(angle))
@@ -82,7 +99,7 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
         rotated2.append(g)
 
     for i in range(len(i_rotate2)):
-        g = args[i_rotate2[i]]
+        g = copy_without_id(va[i_rotate2[i]])
         max_mag = max(max_mag, __get_grad_abs_mag(g))
         rotated2.append(scale_grad(grad=g, scale=np.cos(angle)))
         g = scale_grad(grad=g, scale=-np.sin(angle))
@@ -100,11 +117,15 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
 
     # Add gradients on the corresponding axis together
     g = []
-    if len(rotated1) != 0:
+    if len(rotated1) > 1:
         g.append(add_gradients(grads=rotated1, system=system))
+    elif len(rotated1) == 1:
+        g.append(rotated1[0])
 
-    if len(rotated2) != 0:
+    if len(rotated2) > 1:
         g.append(add_gradients(grads=rotated2, system=system))
+    elif len(rotated2) == 1:
+        g.append(rotated2[0])
 
     # Eliminate zero amplitude gradients
     for i in range(len(g) - 1, -1, -1):
@@ -112,7 +133,7 @@ def rotate(*args: SimpleNamespace, angle: float, axis: str, system: Union[Opts, 
             g.pop(i)
 
     # Export
-    bypass = np.take(args, i_bypass)
+    bypass = [va[i] for i in i_bypass]
     rotated_grads = [*bypass, *g]
 
     if trace_enabled():

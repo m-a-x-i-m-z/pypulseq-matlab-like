@@ -41,28 +41,28 @@ def make_arbitrary_rf(
     signal : numpy.ndarray
         Arbitrary waveform.
     flip_angle : float
-        Flip angle in radians (rad).
+        Flip angle in radians.
     bandwidth : float, default=0
-        Bandwidth in hertz (Hz).
+        Bandwidth in Hertz (Hz).
     delay : float, default=0
         Delay in seconds (s) of accompanying slice select trapezoidal event.
     dwell : float, default=0
-        Temporal sampling step of waveform in seconds (s). If set to 0, will use `system.rf_raster_time`.
+        Temporal sampling step of waveform. If set to 0, will use `system.rf_raster_time`.
     freq_offset : float, default=0
-        Frequency offset in hertz (Hz).
+        Frequency offset in Hertz (Hz).
     no_signal_scaling : bool, default=False
         If set to True no rescaling of the RF amplitude will happen. E.g. for adiabatic pulses.
     max_grad : float, default=system.max_grad
-        Maximum gradient strength (Hz/m) of accompanying slice select trapezoidal event .
+        Maximum gradient strength of accompanying slice select trapezoidal event.
     max_slew : float, default=system.max_slew
-        Maximum slew rate (Hz/m/s) of accompanying slice select trapezoidal event.
+        Maximum slew rate of accompanying slice select trapezoidal event.
     phase_offset : float, default=0
-        Phase offset in radians (rad).
+        Phase offset in Hertz (Hz).a
     return_gz : bool, default=False
         Boolean flag to indicate if slice-selective gradient has to be returned.
     slice_thickness : float, default=0
-        Slice thickness (m) of accompanying slice select trapezoidal event.
-        The slice thickness determines the area of the slice select event.
+        Slice thickness (m) of accompanying slice select trapezoidal event. The slice thickness determines the area of the
+        slice select event.
     system : Opts, default=Opts()
         System limits.
     time_bw_product : float, default=0
@@ -72,11 +72,11 @@ def make_arbitrary_rf(
         Must be one of 'excitation', 'refocusing', 'inversion',
         'saturation', 'preparation', 'other', 'undefined'.
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm).
+        PPM frequency offset.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz).
+        PPM phase offset.
     center : float, default=None
-        RF center in seconds (s).
+        RF center (s).
 
     Returns
     -------
@@ -143,6 +143,9 @@ def make_arbitrary_rf(
     else:
         rf.center, _ = calc_rf_center(rf)
 
+    if time_bw_product > 0 and bandwidth > 0:
+        raise ValueError("Both 'bandwidth' and 'time_bw_product' cannot be specified at the same time.")
+
     if return_gz:
         if slice_thickness <= 0:
             raise ValueError('Slice thickness must be provided.')
@@ -169,6 +172,13 @@ def make_arbitrary_rf(
 
         if rf.delay < (gz.rise_time + gz.delay):
             rf.delay = gz.rise_time + gz.delay
+
+    rf_amplitude = np.max(np.abs(rf.signal))
+    if hasattr(system, 'max_b1') and rf_amplitude > system.max_b1:
+        warn(
+            f'system maximum RF amplitude exceeded ({rf_amplitude / system.max_b1 * 100:.1f}%)',
+            stacklevel=2,
+        )
 
     if trace_enabled():
         rf.trace = trace()

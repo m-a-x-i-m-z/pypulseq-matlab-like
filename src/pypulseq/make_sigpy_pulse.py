@@ -5,6 +5,7 @@ from typing import Tuple, Union
 from warnings import warn
 
 import numpy as np
+from scipy import signal as sp_signal
 
 try:
     import sigpy.mri.rf as rf
@@ -14,6 +15,7 @@ except ModuleNotFoundError as err:
         "SigPy is not installed. Install it using 'pip install sigpy' or 'pip install pypulseq[sigpy]'."
     ) from err
 
+from pypulseq.calc_rf_center import calc_rf_center
 from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.opts import Opts
 from pypulseq.sigpy_pulse_opts import SigpyPulseOpts
@@ -21,10 +23,132 @@ from pypulseq.supported_labels_rf_use import get_supported_rf_uses
 from pypulseq.utils.tracing import trace, trace_enabled
 
 
+def _dzrf_ls_matlab_like(
+    n: int,
+    tb: float,
+    ptype: str,
+    d1: float,
+    d2: float,
+    cancel_alpha_phs: bool,
+) -> np.ndarray:
+    """
+    Version note:
+    - Native SigPy path is kept below in commented form where we switch calls.
+    - This helper is added to reproduce the MATLAB v7 LS-SLR behavior for
+      `ftype='ls'` while keeping the public PyPulseq API unchanged.
+    """
+
+    def _calc_ripples(ptype_: str, d1in: float, d2in: float) -> tuple[float, float, float]:
+        p = str(ptype_).strip().lower()
+        if p == 'st':
+            return 1.0, d1in, d2in
+        if p == 'ex':
+            return np.sqrt(0.5), np.sqrt(d1in / 2.0), d2in / np.sqrt(2.0)
+        if p == 'se':
+            return 1.0, d1in / 4.0, np.sqrt(d2in)
+        if p == 'inv':
+            return 1.0, d1in / 8.0, np.sqrt(d2in / 2.0)
+        if p == 'sat':
+            return np.sqrt(0.5), d1in / 2.0, np.sqrt(d2in)
+        raise ValueError(f'Pulse type ("{ptype_}") is not recognized.')
+
+    def _dinf_local(d1_: float, d2_: float) -> float:
+        a1 = 5.309e-3
+        a2 = 7.114e-2
+        a3 = -4.761e-1
+        a4 = -2.66e-3
+        a5 = -5.941e-1
+        a6 = -4.278e-1
+        l10d1 = np.log10(d1_)
+        l10d2 = np.log10(d2_)
+        return (a1 * l10d1**2 + a2 * l10d1 + a3) * l10d2 + (a4 * l10d1**2 + a5 * l10d1 + a6)
+
+    def _dzls(n_: int, tb_: float, d1_: float, d2_: float) -> np.ndarray:
+        di = _dinf_local(d1_, d2_)
+        w = di / tb_
+        f = np.array([0.0, (1.0 - w) * (tb_ / 2.0), (1.0 + w) * (tb_ / 2.0), n_ / 2.0], dtype=float)
+        f = f / (n_ / 2.0)
+        f = np.clip(f, 0.0, np.nextafter(1.0, 0.0))
+        f[0] = 0.0
+        f[1] = min(f[1], f[2])
+        f[2] = max(f[2], f[1] + np.finfo(float).eps)
+
+        m = np.array([1.0, 1.0, 0.0, 0.0], dtype=float)
+        wt = np.array([1.0, d1_ / d2_], dtype=float)
+        h = sp_signal.firls(n_ + 1, f, m, weight=wt, fs=2.0)
+
+        k = np.concatenate((np.arange(0, n_ // 2 + 1, dtype=float), np.arange(-(n_ // 2), 0, dtype=float)))
+        c = np.exp(1j * 2.0 * np.pi / (2.0 * (n_ + 1)) * k)
+        h = np.real(np.fft.ifft(np.fft.fft(h) * c))
+        return np.asarray(h[:n_], dtype=np.complex128)
+
+    def _mag2mp(x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.complex128).reshape(-1)
+        n_ = int(x.size)
+        xlf = np.fft.fft(np.log(np.abs(x)))
+        xlfp = xlf.copy()
+        xlfp[0] = xlf[0]
+        xlfp[1 : n_ // 2] = 2.0 * xlf[1 : n_ // 2]
+        xlfp[n_ // 2] = xlf[n_ // 2]
+        xlfp[n_ // 2 + 1 :] = 0.0
+        return np.exp(np.fft.ifft(xlfp))
+
+    def _b2a(b: np.ndarray) -> np.ndarray:
+        b = np.asarray(b, dtype=np.complex128).reshape(-1)
+        n_ = int(b.size)
+        npad = n_ * 16
+        bcp = np.zeros((npad,), dtype=np.complex128)
+        bcp[:n_] = b
+        bf = np.fft.fft(bcp)
+        bfmax = np.max(np.abs(bf))
+        if bfmax >= 1.0:
+            bf = bf / (1e-7 + bfmax)
+        afa = _mag2mp(np.sqrt(1.0 - np.abs(bf) ** 2))
+        a = np.fft.fft(afa) / npad
+        return np.flip(a[:n_])
+
+    def _ab2rf(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        a = np.asarray(a, dtype=np.complex128).reshape(-1)
+        b = np.asarray(b, dtype=np.complex128).reshape(-1)
+        n_ = int(a.size)
+        rf_out = np.zeros((n_,), dtype=np.complex128)
+        for idx in range(n_ - 1, -1, -1):
+            cj = np.sqrt(1.0 / (1.0 + np.abs(b[idx] / a[idx]) ** 2))
+            sj = np.conj(cj * b[idx] / a[idx])
+            theta = np.arctan2(np.abs(sj), cj)
+            psi = np.angle(sj)
+            rf_out[idx] = 2.0 * theta * np.exp(1j * psi)
+            if idx > 0:
+                at = cj * a + sj * b
+                bt = -np.conj(sj) * a + cj * b
+                a = at[1 : idx + 1]
+                b = bt[:idx]
+        return rf_out
+
+    def _b2rf(b: np.ndarray, cancel_alpha_phs_: bool) -> np.ndarray:
+        a = _b2a(b)
+        if cancel_alpha_phs_:
+            b_a_phase = np.fft.fft(b) * np.exp(-1j * np.angle(np.fft.fft(np.flip(a))))
+            b = np.fft.ifft(b_a_phase)
+        return _ab2rf(a, b)
+
+    ptype_l = str(ptype).strip().lower()
+    bsf, d1m, d2m = _calc_ripples(ptype_l, float(d1), float(d2))
+    b = _dzls(int(n), float(tb), float(d1m), float(d2m))
+    if ptype_l == 'st':
+        pulse = b
+    elif ptype_l == 'ex':
+        pulse = _b2rf(bsf * b, bool(cancel_alpha_phs))
+    else:
+        pulse = _b2rf(bsf * b, False)
+    return np.asarray(pulse, dtype=np.complex128)
+
+
 def sigpy_n_seq(
     flip_angle: float,
     delay: float = 0.0,
     duration: float = 4e-3,
+    dwell: float = 0.0,
     freq_offset: float = 0.0,
     center_pos: float = 0.5,
     max_grad: float = 0.0,
@@ -47,27 +171,26 @@ def sigpy_n_seq(
     Parameters
     ----------
     flip_angle : float
-        Flip angle in radians (rad).
+        Flip angle in radians.
     delay : float, optional, default=0
         Delay in seconds (s).
     duration : float, optional, default=4e-3
         Duration in seconds (s).
     freq_offset : float, optional, default=0
-        Frequency offset in hertz (Hz).
+        Frequency offset in Hertz (Hz).
     center_pos : float, optional, default=0.5
-        Position of RF peak between 0 and 1, where 0 means the
-        beginning of the pulse and 1 means the end of the pulse.
+        Position of peak.5 (midway).
     max_grad : float, optional, default=0
-        Maximum gradient strength (Hz/m) of accompanying slice select trapezoidal event.
+        Maximum gradient strength of accompanying slice select trapezoidal event.
     max_slew : float, optional, default=0
-        Maximum slew rate (Hz/m/s) of accompanying slice select trapezoidal event.
+        Maximum slew rate of accompanying slice select trapezoidal event.
     phase_offset : float, optional, default=0
-        Phase offset in radians (rad).
-    return_gz : bool, default=False
+        Phase offset in Hertz (Hz).
+    return_gz:bool, default=False
         Boolean flag to indicate if slice-selective gradient has to be returned.
     slice_thickness : float, optional, default=0
-        Slice thickness in meters (m) of accompanying slice select trapezoidal event.
-        The slice thickness determines the area of the slice select event.
+        Slice thickness of accompanying slice select trapezoidal event. The slice thickness determines the area of the
+        slice select event.
     system : Opts, optional
         System limits. Default is a system limits object initialized to default values.
     time_bw_product : float, optional, default=4
@@ -99,9 +222,9 @@ def sigpy_n_seq(
     plot: bool, optional, default=True
         Show sigpy plot outputs
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm).
+        PPM frequency offset.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz).
+        PPM phase offset.
 
     Returns
     -------
@@ -128,11 +251,26 @@ def sigpy_n_seq(
     if use != '' and use not in valid_pulse_uses:
         raise ValueError(f'Invalid use parameter. Must be one of {valid_pulse_uses}. Passed: {use}')
 
+    if use == 'excitation':
+        if flip_angle <= np.pi / 6:
+            pulse_cfg.ptype = 'st'
+        else:
+            pulse_cfg.ptype = 'ex'
+    elif use == 'refocusing':
+        pulse_cfg.ptype = 'se'
+    elif use == 'inversion':
+        pulse_cfg.ptype = 'inv'
+    elif use == 'saturation':
+        pulse_cfg.ptype = 'sat'
+    else:
+        pulse_cfg.ptype = 'st'
+
     if pulse_cfg.pulse_type == 'slr':
         [signal, t, _] = make_slr(
             flip_angle=flip_angle,
             time_bw_product=time_bw_product,
             duration=duration,
+            dwell=dwell,
             system=system,
             pulse_cfg=pulse_cfg,
             disp=plot,
@@ -151,7 +289,10 @@ def sigpy_n_seq(
     rfp.type = 'rf'
     rfp.signal = signal
     rfp.t = t
-    rfp.shape_dur = t[-1]
+    if dwell == 0:
+        dwell = system.rf_raster_time
+    rfp.dwell = dwell
+    rfp.shape_dur = len(t) * dwell
     rfp.freq_offset = freq_offset
     rfp.phase_offset = phase_offset
     rfp.freq_ppm = freq_ppm
@@ -159,8 +300,8 @@ def sigpy_n_seq(
     rfp.dead_time = system.rf_dead_time
     rfp.ringdown_time = system.rf_ringdown_time
     rfp.delay = delay
-    rfp.center = center_pos * rfp.shape_dur
     rfp.use = use
+    rfp.center = calc_rf_center(rfp)[0]
 
     if rfp.dead_time > rfp.delay:
         warn(
@@ -187,7 +328,7 @@ def sigpy_n_seq(
         gzr = make_trapezoid(
             channel='z',
             system=system,
-            area=-area * (1 - center_pos) - 0.5 * (gz.area - area),
+            area=-area * (1 - rfp.center / rfp.shape_dur) - 0.5 * (gz.area - area),
         )
 
         if rfp.delay > gz.rise_time:
@@ -213,6 +354,7 @@ def make_slr(
     flip_angle: float,
     time_bw_product: float = 4.0,
     duration: float = 0.0,
+    dwell: float = 0.0,
     system: Union[Opts, None] = None,
     pulse_cfg: Union[SigpyPulseOpts, None] = None,
     disp: bool = False,
@@ -223,8 +365,10 @@ def make_slr(
     if pulse_cfg is None:
         pulse_cfg = SigpyPulseOpts()
 
-    n_samples = round(duration / system.rf_raster_time)
-    t = np.arange(1, n_samples + 1) * system.rf_raster_time
+    if dwell == 0:
+        dwell = system.rf_raster_time
+    n_samples = round(duration / dwell)
+    t = (np.arange(1, n_samples + 1) - 0.5) * dwell
 
     # Insert sigpy
     ptype = pulse_cfg.ptype
@@ -233,16 +377,36 @@ def make_slr(
     d2 = pulse_cfg.d2
     cancel_alpha_phs = pulse_cfg.cancel_alpha_phs
 
-    pulse = rf.slr.dzrf(
-        n=n_samples,
-        tb=time_bw_product,
-        ptype=ptype,
-        ftype=ftype,
-        d1=d1,
-        d2=d2,
-        cancel_alpha_phs=cancel_alpha_phs,
-    )
-    flip = np.sum(pulse) * system.rf_raster_time * 2 * np.pi
+    if str(ftype).strip().lower() == 'ls':
+        pulse = _dzrf_ls_matlab_like(
+            n=n_samples,
+            tb=time_bw_product,
+            ptype=ptype,
+            d1=d1,
+            d2=d2,
+            cancel_alpha_phs=cancel_alpha_phs,
+        )
+        # Original native SigPy call kept for easy rollback/reference:
+        # pulse = rf.slr.dzrf(
+        #     n=n_samples,
+        #     tb=time_bw_product,
+        #     ptype=ptype,
+        #     ftype=ftype,
+        #     d1=d1,
+        #     d2=d2,
+        #     cancel_alpha_phs=cancel_alpha_phs,
+        # )
+    else:
+        pulse = rf.slr.dzrf(
+            n=n_samples,
+            tb=time_bw_product,
+            ptype=ptype,
+            ftype=ftype,
+            d1=d1,
+            d2=d2,
+            cancel_alpha_phs=cancel_alpha_phs,
+        )
+    flip = np.abs(np.sum(pulse)) * dwell * 2 * np.pi
     signal = pulse * flip_angle / flip
 
     if disp:
@@ -276,7 +440,7 @@ def make_sms(
         pulse_cfg = SigpyPulseOpts()
 
     n_samples = round(duration / system.rf_raster_time)
-    t = np.arange(1, n_samples + 1) * system.rf_raster_time
+    t = (np.arange(1, n_samples + 1) - 0.5) * system.rf_raster_time
 
     # Insert sigpy
     ptype = pulse_cfg.ptype
@@ -288,18 +452,38 @@ def make_sms(
     band_sep = pulse_cfg.band_sep
     phs_0_pt = pulse_cfg.phs_0_pt
 
-    pulse_in = rf.slr.dzrf(
-        n=n_samples,
-        tb=time_bw_product,
-        ptype=ptype,
-        ftype=ftype,
-        d1=d1,
-        d2=d2,
-        cancel_alpha_phs=cancel_alpha_phs,
-    )
+    if str(ftype).strip().lower() == 'ls':
+        pulse_in = _dzrf_ls_matlab_like(
+            n=n_samples,
+            tb=time_bw_product,
+            ptype=ptype,
+            d1=d1,
+            d2=d2,
+            cancel_alpha_phs=cancel_alpha_phs,
+        )
+        # Original native SigPy call kept for easy rollback/reference:
+        # pulse_in = rf.slr.dzrf(
+        #     n=n_samples,
+        #     tb=time_bw_product,
+        #     ptype=ptype,
+        #     ftype=ftype,
+        #     d1=d1,
+        #     d2=d2,
+        #     cancel_alpha_phs=cancel_alpha_phs,
+        # )
+    else:
+        pulse_in = rf.slr.dzrf(
+            n=n_samples,
+            tb=time_bw_product,
+            ptype=ptype,
+            ftype=ftype,
+            d1=d1,
+            d2=d2,
+            cancel_alpha_phs=cancel_alpha_phs,
+        )
     pulse = rf.multiband.mb_rf(pulse_in, n_bands=n_bands, band_sep=band_sep, phs_0_pt=phs_0_pt)
 
-    flip = np.sum(pulse) * system.rf_raster_time * 2 * np.pi
+    flip = np.abs(np.sum(pulse)) * system.rf_raster_time * 2 * np.pi
     signal = pulse * flip_angle / flip
 
     if disp:

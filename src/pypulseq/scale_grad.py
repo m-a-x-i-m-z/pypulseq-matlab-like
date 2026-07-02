@@ -26,6 +26,11 @@ def scale_grad(grad: SimpleNamespace, scale: float, system: Union[Opts, None] = 
     grad : SimpleNamespace
         Scaled gradient.
     """
+    if hasattr(grad, 'id'):
+        raise ValueError(
+            'scale_grad() was passed a gradient with an id field. Scale gradients before registration or remove the id field.'
+        )
+
     # copy() to emulate pass-by-value; otherwise passed grad event is modified
     scaled_grad = copy(grad)
     if scaled_grad.type == 'trap':
@@ -37,11 +42,12 @@ def scale_grad(grad: SimpleNamespace, scale: float, system: Union[Opts, None] = 
                     f'scale_grad: maximum amplitude exceeded {100 * abs(scaled_grad.amplitude) / system.max_grad} %'
                 )
             if (
-                abs(grad.amplitude) > eps
+                abs(scaled_grad.amplitude) > eps
                 and abs(scaled_grad.amplitude) / min(scaled_grad.rise_time, scaled_grad.fall_time) > system.max_slew
             ):
                 raise ValueError(
-                    'mr.scale_grad: maximum slew rate exceeded {100 * abs(scaled_grad.amplitude) / min(scaled_grad.rise_time, scaled_grad.fall_time) / system.max_slew} %'
+                    f'mr.scale_grad: maximum slew rate exceeded '
+                    f'{100 * abs(scaled_grad.amplitude) / min(scaled_grad.rise_time, scaled_grad.fall_time) / system.max_slew} %'
                 )
 
     else:
@@ -60,8 +66,5 @@ def scale_grad(grad: SimpleNamespace, scale: float, system: Union[Opts, None] = 
                         f'scale_grad: maximum slew rate exceeded {100 * scaled_grad_max_abs_slew / system.max_slew} %'
                     )
     scaled_grad.area = scaled_grad.area * scale
-
-    if hasattr(scaled_grad, 'id'):
-        delattr(scaled_grad, 'id')
 
     return scaled_grad

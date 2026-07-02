@@ -1,8 +1,7 @@
 import itertools
 from math import ceil, floor, gcd, isclose, prod
 from types import SimpleNamespace
-from typing import List, Tuple, Union
-from warnings import warn
+from typing import Tuple, Union
 
 import numpy as np
 
@@ -38,13 +37,13 @@ def make_adc(
     delay : float, default=0
         Delay in seconds (s) of ADC readout event.
     freq_offset : float, default=0
-        Frequency offset in hertz (Hz) of ADC readout event.
+        Frequency offset of ADC readout event.
     phase_offset : float, default=0
-        Phase offset in radians (rad) of ADC readout event.
+        Phase offset of ADC readout event.
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm) of ADC readout event.
+        PPM frequency offset of ADC readout event.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz) of ADC readout event.
+        PPM phase offset of ADC readout event.
     phase_modulation : Union[np.ndarray, None], default=None
         Phase modulation array for FOV shifting.
         If provided, it must have `num_samples` number of samples.
@@ -78,19 +77,12 @@ def make_adc(
 
     if phase_modulation is not None and len(phase_modulation) != num_samples:
         raise ValueError('ADC Phase modulation vector must have the same length as the number of samples')
-    adc.phase_modulation = phase_modulation
+    adc.phase_modulation = [] if phase_modulation is None else phase_modulation
 
     if duration > 0:
         adc.dwell = duration / num_samples
 
-    if dwell > 0:
-        adc.duration = dwell * num_samples
-
     if adc.dead_time > adc.delay:
-        warn(
-            f'Specified ADC delay {adc.delay * 1e6:.2f} us is less than the dead time {adc.dead_time * 1e6:.0f} us. Delay was increased to the dead time.',
-            stacklevel=2,
-        )
         adc.delay = adc.dead_time
 
     if trace_enabled():
@@ -100,7 +92,7 @@ def make_adc(
 
 
 def calc_adc_segments(
-    num_samples: int, dwell: float, system: Union[Opts, None] = None, mode: str = 'lengthen'
+    num_samples: int, dwell: float, system: Union[Opts, None] = None, mode: str = 'shorten'
 ) -> Tuple[int, int]:
     """Calculate splitting of the ADC in segments with equal samples.
 
@@ -112,7 +104,7 @@ def calc_adc_segments(
         Dwell time of the ADC in [s]
     system : Opts, default=None
        System limits. Default is a system limits object initialized to default values.
-    mode : str, default='lengthen'
+    mode : str, default='shorten'
         The total number of samples can either be shortened or lengthened to match the constraints.
 
     Returns
@@ -126,7 +118,7 @@ def calc_adc_segments(
     sample length (8192 samples on Siemens) should be splittable to N
     equal parts, each of which aligned to the gradient raster. Each
     segment, however, needs to have the number of samples smaller than
-    system.adcSamplesLimit' and divisible by system.adcSamplesDivisor to be
+    system.adc_samples_limit' and divisible by system.adc_samples_divisor to be
     executable on the scanner. The optional parameter mode can be either
     'shorten' or 'lengthen'." [Matlab implementation of 'calcAdcSeg'. https://github.com/pulseq]
 
@@ -142,8 +134,10 @@ def calc_adc_segments(
     # Define maximum number of segments for the ADC
     max_segments = 128
 
+    if mode == 'lenghen':
+        mode = 'lengthen'
     if mode not in ['shorten', 'lengthen']:
-        raise ValueError(f"'mode' must be 'shorten' or 'lengthen' but is {mode}")
+        raise ValueError("In calc_adc_segments(..., mode) mode should be either 'shorten' or 'lengthen'")
 
     if system is None:
         system = Opts.default
@@ -162,13 +156,13 @@ def calc_adc_segments(
     if not isclose(dwell / system.adc_raster_time, i_dwell):
         raise ValueError("'dwell' is not a multiple of system 'adc_raster_time'.")
 
-    i_common = _lcm(i_gr, i_dwell)
+    i_common = (i_gr * i_dwell) // gcd(i_gr, i_dwell)
     min_samples_segment = int(i_common / i_dwell)  # lcm(a,b)/b is always int
 
     # Siemens: Number of Samples should be divisible by a divisor
     gcd_adcdiv = gcd(min_samples_segment, system.adc_samples_divisor)
     if gcd_adcdiv != system.adc_samples_divisor:
-        min_samples_segment *= system.adc_samples_divisor / gcd_adcdiv
+        min_samples_segment = int(min_samples_segment * system.adc_samples_divisor / gcd_adcdiv)
 
     # Get segment multiplier
     if mode == 'shorten':
@@ -177,7 +171,22 @@ def calc_adc_segments(
         samples_seg_multip = ceil(num_samples / min_samples_segment)
     while samples_seg_multip > 0 and samples_seg_multip < (2 * num_samples / min_samples_segment):
         # Get prime factors from segments multiplier
-        adc_seg_primes = _prime_factors(samples_seg_multip)
+        if samples_seg_multip == 1:
+            adc_seg_primes = [1]
+        else:
+            adc_seg_primes = []
+            n = samples_seg_multip
+            while n % 2 == 0:
+                adc_seg_primes.append(2)
+                n //= 2
+            i = 3
+            while i * i <= n:
+                while n % i == 0:
+                    adc_seg_primes.append(i)
+                    n //= i
+                i += 2
+            if n > 2:
+                adc_seg_primes.append(n)
         num_segments = 1
         if len(adc_seg_primes) > 1:
             num_segments_candids = set()
@@ -206,32 +215,3 @@ def calc_adc_segments(
         raise ValueError(f'Number of segments ({num_segments}) exceeds allowed number of {max_segments}')
 
     return int(num_segments), int(num_samples_seg)
-
-
-def _prime_factors(n: int) -> List[int]:
-    """Compute the prime factors of given integer n."""
-    if n == 1:
-        return [1]
-    else:
-        factors = []
-        # Dividing n by 2 until it's odd
-        while n % 2 == 0:
-            factors.append(2)
-            n //= 2
-
-        # Checking odd factors from 3 upwards
-        i = 3
-        while i * i <= n:
-            while n % i == 0:
-                factors.append(i)
-                n //= i
-            i += 2
-        if n > 2:
-            factors.append(n)
-
-        return factors
-
-
-def _lcm(a, b):
-    """Calculates the least common multiple of a and b."""
-    return (a * b) // gcd(a, b)

@@ -58,7 +58,6 @@ def make_label(label: str, type: str, value: Union[bool, float, int]) -> SimpleN
         If `value` was not a valid numerical or logical value.
     """
     arr_supported_labels = get_supported_labels()
-    arr_flags = arr_supported_labels[10:-1]
 
     if label not in arr_supported_labels:
         raise ValueError(f'Invalid label. Must be one of {arr_supported_labels}.')
@@ -71,12 +70,9 @@ def make_label(label: str, type: str, value: Union[bool, float, int]) -> SimpleN
     if type == 'SET':
         out.type = 'labelset'
     elif type == 'INC':
-        if label in arr_flags:
-            raise ValueError(f'As per Pulseq specification, labelinc is not compatible with flags: {arr_flags}.')
         out.type = 'labelinc'
 
     out.label = label
-    # Force value to an integer, because that is how it will be written to the sequence file
-    out.value = int(value)
+    out.value = value
 
     return out

@@ -64,6 +64,9 @@ def read(self, path: str, detect_rf_use: Union[bool, None] = None, remove_duplic
     self.extension_numeric_idx = []
 
     file_version_combined = 0
+    file_version_major = 0
+    file_version_minor = 0
+    file_version_revision = 0
 
     # Load data from file
     while True:
@@ -217,15 +220,57 @@ def read(self, path: str, detect_rf_use: Union[bool, None] = None, remove_duplic
             elif section[:16] == 'extension DELAYS':
                 extension_id = int(section[16:])
                 self.set_extension_string_ID('DELAYS', extension_id)
+
+                def parse_soft_delay_hint(s):
+                    if s in self.soft_delay_hint_ids:
+                        return self.soft_delay_hint_ids[s]
+                    hint_id = len(self.soft_delay_hints2) + 1
+                    self.soft_delay_hint_ids[s] = hint_id
+                    self.soft_delay_hints2.append(s)
+                    return hint_id
+
                 self.soft_delay_library = __read_and_parse_events(
-                    input_file, int, lambda ofs: 1e-6 * int(ofs), int, str
+                    input_file, lambda n: int(float(n)), lambda ofs: 1e-6 * float(ofs), float, parse_soft_delay_hint
                 )
-                # Map numIDs to soft delay hints
+                # Map hint strings to numIDs
                 for d in self.soft_delay_library.data.values():
-                    if d[3] not in self.soft_delay_hints:
-                        self.soft_delay_hints[d[3]] = d[0]
+                    hint_str = self.soft_delay_hints2[int(d[3]) - 1] if int(d[3]) > 0 else ''
+                    if hint_str and hint_str not in self.soft_delay_hints:
+                        self.soft_delay_hints[hint_str] = int(float(d[0]))
+            elif section[:19] == 'extension ROTATIONS':
+                extension_id = int(section[19:])
+                self.set_extension_string_ID('ROTATIONS', extension_id)
+                self.rotation_library = __read_events(input_file, (1, 1, 1, 1), event_library=self.rotation_library)
+                # MATLAB read.m normalizes all quaternions after reading.
+                for key in self.rotation_library.data:
+                    q = np.asarray(self.rotation_library.data[key], dtype=float)
+                    q_norm = np.linalg.norm(q)
+                    if q_norm > 0:
+                        self.rotation_library.data[key] = q / q_norm
+            elif section[:18] == 'extension RF_SHIMS':
+                extension_id = int(section[18:])
+                self.set_extension_string_ID('RF_SHIMS', extension_id)
+                # Read variable length float data
+                line = __strip_line(input_file)
+                while line != -1 and line != '' and line[0] != '#':
+                    parts = line.split()
+                    if len(parts) > 0:
+                        key_id = int(parts[0])
+                        data = [float(x) for x in parts[2:]]
+                        self.rf_shim_library.insert(key_id=key_id, new_data=data)
+                    line = __strip_line(input_file)
             else:
-                raise ValueError(f'Unknown section code: {section}')
+                if section.startswith('extension'):
+                    warnings.warn(f'Ignoring unknown extension, input string: {section}')
+                    ext_parts = section.split()
+                    if len(ext_parts) >= 3:
+                        try:
+                            self.set_extension_string_ID(ext_parts[1], int(ext_parts[2]))
+                        except ValueError:
+                            pass
+                    __skip_section(input_file)
+                else:
+                    raise ValueError(f'Unknown section code: {section}')
 
     input_file.close()  # Close file
 
@@ -370,8 +415,9 @@ def read(self, path: str, detect_rf_use: Union[bool, None] = None, remove_duplic
                     if grad.delay > 0:
                         grad_prev_last[j] = 0.0
 
-                    # go to next channel, if grad.first is already set
-                    if hasattr(grad, 'first') and grad.first is not None:
+                    # MATLAB dev behavior: only skip restoration when grad.first is finite.
+                    # Older files can carry NaN placeholders for unset first/last.
+                    if hasattr(grad, 'first') and grad.first is not None and np.isfinite(grad.first):
                         continue
 
                     # if grad.first is not set, set it to the last value of the previous gradient
@@ -491,7 +537,7 @@ def __read_version(input_file) -> Tuple[int, int, int]:
     """
     line = __strip_line(input_file)
     major, minor, revision = 0, 0, 0
-    while line != '' and line[0] != '#':
+    while line != -1 and line != '' and line[0] != '#':
         tok = line.split(' ')
         if tok[0] == 'major':
             major = int(tok[1])
@@ -533,7 +579,7 @@ def __read_blocks(
     delay_idx = {}
     line = __strip_line(input_file)
 
-    while line != '' and line != '#':
+    while line != -1 and line != '' and line[0] != '#':
         block_events = np.fromstring(line, dtype=int, sep=' ')
 
         if version_combined <= 1002001:
@@ -594,7 +640,7 @@ def __read_events(
     else:
         type_idx = type_idx.item()
 
-    while line != '' and line != '#':
+    while line != -1 and line != '' and line[0] != '#':
         data = __fromstring(line, format_spec)
         event_id = data[0]
 
@@ -644,7 +690,7 @@ def __read_and_parse_events(input_file, *args: Callable) -> EventLibrary:
     event_library = EventLibrary()
     line = __strip_line(input_file)
 
-    while line != '' and line != '#':
+    while line != -1 and line != '' and line[0] != '#':
         list_of_data_str = re.split(r'(\s+)', line)
         list_of_data_str = [d for d in list_of_data_str if d != ' ']
         data = []  # np.zeros(len(list_of_data_str) - 1, dtype=np.int32)
@@ -658,6 +704,15 @@ def __read_and_parse_events(input_file, *args: Callable) -> EventLibrary:
         line = __strip_line(input_file)
 
     return event_library
+
+
+def __skip_section(input_file) -> None:
+    """
+    Read and discard a section body until a blank line or comment line.
+    """
+    line = __strip_line(input_file)
+    while line != -1 and line != '' and line[0] != '#':
+        line = __strip_line(input_file)
 
 
 def __read_shapes(input_file, force_convert_uncompressed: bool) -> EventLibrary:
@@ -677,23 +732,18 @@ def __read_shapes(input_file, force_convert_uncompressed: bool) -> EventLibrary:
 
     line = __skip_comments(input_file)
 
-    while line != -1 and (line != '' or line[0:8] == 'shape_id'):
+    while line != -1 and line != '' and line.startswith('shape_id'):
         tok = line.split(' ')
         shape_id = int(tok[1])
         line = __skip_comments(input_file)
-        if line == -1:
-            break
         tok = line.split(' ')
         num_samples = int(tok[1])
         data = []
         line = __skip_comments(input_file)
-        while line != -1 and line != '' and line != '#':
+        while line != -1 and line != '' and line[0] != '#':
             data.append(float(line))
             line = __strip_line(input_file)
-
-        eof_reached = line == -1
-        if not eof_reached:
-            line = __skip_comments(input_file, stop_before_section=True)
+        line = __skip_comments(input_file, stop_before_section=True)
 
         # Check if conversion is needed: in v1.4.x we use length(data)==num_samples
         # As a marker for the uncompressed (stored) data. In older versions this condition could occur by chance
@@ -707,9 +757,6 @@ def __read_shapes(input_file, force_convert_uncompressed: bool) -> EventLibrary:
             data.insert(0, num_samples)
             data = np.asarray(data)
         shape_library.insert(key_id=shape_id, new_data=data)
-
-        if eof_reached:
-            break
     return shape_library
 
 

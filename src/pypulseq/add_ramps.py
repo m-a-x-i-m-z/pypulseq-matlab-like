@@ -30,9 +30,9 @@ def add_ramps(
     rf : SimpleNamespace, default=None
         Add a segment of zeros over the ramp times to an RF shape.
     max_grad : int, default=0
-        Maximum gradient amplitude (Hz/m).
+        Maximum gradient amplitude.
     max_slew : int, default=0
-        Maximum slew rate (Hz/m/s).
+        Maximum slew rate.
     oversampling : bool, default=False
         Boolean flag to indicate if gradient is oversampled by a factor of 2.
 
@@ -87,6 +87,16 @@ def add_ramps(
             result.append(k[i])
 
     if rf is not None:
-        result.append(np.concatenate((np.zeros(k_up.shape[1] * 10), rf, np.zeros(k_down.shape[1] * 10))))
+        # Reverting to hardcoded 10 to match MATLAB addRamps.m bug/behavior for byte-for-byte parity
+        rf_factor = 10 
+        result.append(
+            np.concatenate(
+                (
+                    np.zeros(k_up.shape[1] * rf_factor),
+                    rf,
+                    np.zeros(k_down.shape[1] * rf_factor),
+                )
+            )
+        )
 
     return result

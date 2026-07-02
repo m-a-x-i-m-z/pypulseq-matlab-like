@@ -31,21 +31,21 @@ def make_block_pulse(
     Parameters
     ----------
     flip_angle : float
-        Flip angle in radians (rad).
+        Flip angle in radians.
     delay : float, default=0
         Delay in seconds (s).
     duration : float, default=None
         Duration in seconds (s).
     bandwidth : float, default=None
-        Bandwidth in hertz (Hz).
+        Bandwidth in Hertz (Hz).
         If supplied without time_bw_product duration = 1 / (4 * bandwidth)
     time_bw_product : float, default=None
         Time-bandwidth product.
         If supplied with bandwidth, duration = time_bw_product / bandwidth
     freq_offset : float, default=0
-        Frequency offset in hertz (Hz).
+        Frequency offset in Hertz (Hz).
     phase_offset : float, default=0
-        Phase offset in radians (rad).
+        Phase offset Hertz (Hz).
     system : Opts, default=Opts()
         System limits.
     use : str, default='undefined'
@@ -53,9 +53,9 @@ def make_block_pulse(
         Must be one of 'excitation', 'refocusing', 'inversion',
         'saturation', 'preparation', 'other', 'undefined'.
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm).
+        PPM frequency offset.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz).
+        PPM phase offset.
 
     Returns
     -------
@@ -77,8 +77,7 @@ def make_block_pulse(
         raise ValueError(f'Invalid use parameter. Must be one of {valid_pulse_uses}. Passed: {use}')
 
     if duration is None and bandwidth is None:
-        warn('Using default 4 ms duration for block pulse.')
-        duration = 4e-3
+        raise ValueError('Either bandwidth or duration must be defined.')
     elif duration is not None and bandwidth is not None and duration > 0:
         # Multiple arguments
         raise ValueError('One of bandwidth or duration must be defined, but not both.')
@@ -123,6 +122,13 @@ def make_block_pulse(
             stacklevel=2,
         )
         rf.delay = rf.dead_time
+
+    rf_amplitude = np.max(np.abs(rf.signal))
+    if hasattr(system, 'max_b1') and rf_amplitude > system.max_b1:
+        warn(
+            f'system maximum RF amplitude exceeded ({rf_amplitude / system.max_b1 * 100:.1f}%)',
+            stacklevel=2,
+        )
 
     if trace_enabled():
         rf.trace = trace()

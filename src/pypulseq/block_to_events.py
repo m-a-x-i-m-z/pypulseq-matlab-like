@@ -16,25 +16,38 @@ def block_to_events(*args: SimpleNamespace | float) -> Tuple[SimpleNamespace, ..
     events : list[SimpleNamespace]
         List of events comprising `args` if it was a block, otherwise `args` unmodified.
     """
-    if len(args) == 1 and hasattr(args[0], 'rf'):
-        events = list(vars(args[0]).values())  # Get all attrs
-        events = list(filter(lambda filter_none: filter_none is not None, events))  # Filter None attributes
-        events = __get_label_events_if_any(*events)  # Flatten label events from dict datatype
-        events = tuple(events)
+    items = tuple(args)
 
-    else:  # args is a tuple of events
-        return args
+    # MATLAB parity: strip away nested 1x1 cell wrappers.
+    while (
+        len(items) == 1
+        and isinstance(items[0], (list, tuple))
+        and len(items[0]) == 1
+        and isinstance(items[0][0], (list, tuple))
+    ):
+        items = tuple(items[0])
 
-    return events
+    if len(items) == 0:
+        return tuple()
 
+    first = items[0]
+    if hasattr(first, 'rf'):
+        if len(items) != 1:
+            raise ValueError('Only a single block structure can be added.')
 
-def __get_label_events_if_any(*events: list) -> list:
-    # Are any of the events labels? If yes, extract them from dict()
-    final_events = []
-    for e in events:
-        if isinstance(e, dict):  # Only labels are stored as dicts
-            final_events.extend(e.values())
-        else:
-            final_events.append(e)
+        # MATLAB parity with +mr/block2events.m:
+        # struct2cell(first), then remove empties.
+        events = []
+        for value in vars(first).values():
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                events.extend(value)
+            else:
+                events.append(value)
+        return tuple(events)
 
-    return final_events
+    if isinstance(first, (list, tuple)):
+        return tuple(first)
+
+    return tuple(items)

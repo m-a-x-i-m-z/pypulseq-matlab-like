@@ -110,9 +110,14 @@ def make_soft_delay(
     if default_duration <= 0:
         raise ValueError('Default duration must be greater than 0.')
     if factor == 0:
-        raise ValueError("Parameter 'factor' cannot be zero (would make duration calculation undefined).")
-    if numID is not None and (not isinstance(numID, int) or numID < 0):
-        raise ValueError("Parameter 'numID' must be a non-negative integer or None.")
+        raise ValueError("Parameter 'factor' must be nonzero.")
+    if numID is not None:
+        if isinstance(numID, (int, float)) and float(numID).is_integer():
+            numID = int(numID)
+        else:
+            raise ValueError("Parameter 'numID' must be a non-negative integer or None.")
+        if numID < 0:
+            raise ValueError("Parameter 'numID' must be a non-negative integer or None.")
 
     soft_delay.type = 'soft_delay'
     soft_delay.numID = numID

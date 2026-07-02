@@ -59,6 +59,12 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
         output_file.write(f'revision {self.version_revision}\n')
         output_file.write('\n')
 
+        if len(self.rotation_library.data) != 0:
+            required_extensions = str(self.get_definition('RequiredExtensions')).strip()
+            if 'ROTATIONS' not in required_extensions:
+                required_extensions = (required_extensions + ' ROTATIONS').strip()
+                self.set_definition('RequiredExtensions', required_extensions)
+
         if len(self.definitions) != 0:
             output_file.write('[DEFINITIONS]\n')
             keys = sorted(self.definitions.keys())
@@ -103,9 +109,9 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
 
         if len(self.rf_library.data) != 0:
             output_file.write('# Format of RF events:\n')
-            output_file.write('# id ampl. mag_id phase_id time_shape_id center delay freqPPm phasePPM freq phase use\n')
+            output_file.write('# id ampl. mag_id phase_id time_shape_id center delay freqPPM phasePPM freq phase use\n')
             output_file.write('# ..   Hz      ..       ..            ..     us    us     ppm  rad/MHz   Hz   rad  ..\n')
-            output_file.write(f'# Field "use" is the initial of: {" ".join(get_supported_rf_uses()).strip()}\n')
+            output_file.write(f"# Field 'use' is the initial of: \n#   {' '.join(get_supported_rf_uses()).strip()}\n")
             output_file.write('[RF]\n')
             id_format_str = (
                 '{:.0f} {:12g} {:.0f} {:.0f} {:.0f} {:g} {:g} {:g} {:g} {:g} {:g} {:s}\n'  # Refer lines 20-21
@@ -121,7 +127,7 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
 
         grad_lib_values = np.array(list(self.grad_library.type.values()))
         arb_grad_mask = grad_lib_values == 'g' if self.grad_library.type else False
-        trap_grad_mask = grad_lib_values == 't' if self.grad_library.type else False
+        trap_grad_mask = grad_lib_values == 't' if self.grad_library.type else False 
 
         if np.any(arb_grad_mask):
             output_file.write('# Format of arbitrary gradients:\n')
@@ -213,8 +219,8 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
         if len(self.label_inc_library.data) != 0:
             labels = get_supported_labels()
 
-            output_file.write('# Extension specification for setting labels:\n')
-            output_file.write('# id set labelstring\n')
+            output_file.write('# Extension specification for increasing labels:\n')  # Updated comment
+            output_file.write('# id inc labelstring\n')  # Updated comment
             tid = self.get_extension_type_ID('LABELINC')
             output_file.write(f'extension LABELINC {tid}\n')
             id_format_str = '{:.0f} {:.0f} {}\n'  # See comment at the beginning of this method definition
@@ -232,11 +238,47 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
 
             tid = self.get_extension_type_ID('DELAYS')
             output_file.write(f'extension DELAYS {tid}\n')
-            id_format_str = '{:.0f} {:.0f} {:.0f} {:.0f} {}\n'
+            # Format according to MATLAB: fprintf(fid, '%d %d %g %g %s\n', ...);
+            id_format_str = '{:.0f} {:.0f} {:g} {:g} {}\n'
 
             for k in self.soft_delay_library.data:
                 data = self.soft_delay_library.data[k]
-                s = id_format_str.format(k, data[0], np.round(data[1] * 1e6), data[2], data[3])
+                hint_id = int(float(data[3]))
+                hint = self.soft_delay_hints2[hint_id - 1] if hint_id > 0 else ''
+                # MATLAB writes offset in us and uses %g for offset and factor
+                s = id_format_str.format(k, float(data[0]), data[1] * 1e6 + 0.0, data[2] + 0.0, hint)
+                output_file.write(s)
+            output_file.write('\n')
+
+        if len(self.rf_shim_library.data) != 0:
+            output_file.write('# Extension specification for RF shimming:\n')
+            output_file.write('# id num_chan magn_c1 phase_c1 magn_c2 phase_c2 ...\n')
+            tid = self.get_extension_type_ID('RF_SHIMS')
+            output_file.write(f'extension RF_SHIMS {tid}\n')
+            # Variable length format, MATLAB uses %g
+            for k in self.rf_shim_library.data:
+                data = self.rf_shim_library.data[k]
+                num_chan = len(data) // 2
+                s = '{:.0f} {:.0f}'.format(k, num_chan)
+                for val in data:
+                    s += ' {:g}'.format(val + 0.0)
+                s += '\n'
+                output_file.write(s)
+            output_file.write('\n')
+
+        if len(self.rotation_library.data) != 0:
+            output_file.write('# Extension specification for rotation events:\n')
+            output_file.write('# id RotQuat0 RotQuatX RotQuatY RotQuatZ\n')
+            tid = self.get_extension_type_ID('ROTATIONS')
+            output_file.write(f'extension ROTATIONS {tid}\n')
+            # MATLAB: fprintf(fid, '%d ', k); fprintf(fid, ' %g', ...);
+            # This results in a double space after the ID.
+            for k in self.rotation_library.data:
+                data = self.rotation_library.data[k]
+                s = '{:.0f} '.format(k)
+                for val in data:
+                    s += ' {:g}'.format(val + 0.0)
+                s += '\n'
                 output_file.write(s)
             output_file.write('\n')
 
@@ -255,24 +297,27 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
 
     if create_signature:  # Sign the file
         # Calculate digest
-        with open(file_name, 'rb') as output_file:
+        with open(file_name, 'r') as output_file:
             buffer = output_file.read()
 
-            md5 = hashlib.md5(buffer).hexdigest()
+            md5 = hashlib.md5(buffer.encode('utf-8')).hexdigest()
 
         # Write signature
         with open(file_name, 'a') as output_file:
             output_file.write('\n[SIGNATURE]\n')
             output_file.write(
-                '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE] section was added\n'
+                '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE]\n'
             )
             output_file.write(
-                '# It can be reproduced/verified with md5sum if the file trimmed to the position right above [SIGNATURE]\n'
+                '# section was added. It can be reproduced/verified with md5sum if the file\n'
             )
             output_file.write(
-                '# The new line character preceding [SIGNATURE] BELONGS to the signature (and needs to be stripped away for '
-                'recalculating/verification)\n'
+                '# trimmed to the position right above [SIGNATURE]. The new line character\n'
             )
+            output_file.write(
+                '# preceding [SIGNATURE] BELONGS to the signature (and needs to be sripped away\n'
+            )
+            output_file.write('# for recalculating/verification)\n')
             output_file.write('Type md5\n')
             output_file.write(f'Hash {md5}\n')
 
@@ -515,24 +560,27 @@ def write_v141(self, file_name: Union[str, Path], create_signature, remove_dupli
 
     if create_signature:  # Sign the file
         # Calculate digest
-        with open(file_name, 'rb') as output_file:
+        with open(file_name, 'r') as output_file:
             buffer = output_file.read()
 
-            md5 = hashlib.md5(buffer).hexdigest()
+            md5 = hashlib.md5(buffer.encode('utf-8')).hexdigest()
 
         # Write signature
         with open(file_name, 'a') as output_file:
             output_file.write('\n[SIGNATURE]\n')
             output_file.write(
-                '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE] section was added\n'
+                '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE]\n'
             )
             output_file.write(
-                '# It can be reproduced/verified with md5sum if the file trimmed to the position right above [SIGNATURE]\n'
+                '# section was added. It can be reproduced/verified with md5sum if the file\n'
             )
             output_file.write(
-                '# The new line character preceding [SIGNATURE] BELONGS to the signature (and needs to be stripped away for '
-                'recalculating/verification)\n'
+                '# trimmed to the position right above [SIGNATURE]. The new line character\n'
             )
+            output_file.write(
+                '# preceding [SIGNATURE] BELONGS to the signature (and needs to be sripped away\n'
+            )
+            output_file.write('# for recalculating/verification)\n')
             output_file.write('Type md5\n')
             output_file.write(f'Hash {md5}\n')
 

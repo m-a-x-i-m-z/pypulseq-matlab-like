@@ -16,7 +16,7 @@ def calc_rf_bandwidth(
     return_spectrum: bool = False,
     dw: float = 10,
     dt: Union[float, None] = None,
-) -> Union[float, Tuple[float, np.ndarray], Tuple[float, np.ndarray, float]]:
+) -> Union[float, Tuple[float, np.ndarray], Tuple[float, np.ndarray, np.ndarray]]:
     """
     Calculate the spectrum of the RF pulse. Returns the bandwidth of the pulse (calculated by a simple FFT, e.g.
     presuming a low-angle approximation) and optionally the spectrum and the frequency axis. The default for the
@@ -59,17 +59,23 @@ def calc_rf_bandwidth(
 
     # Resample the pulse to a reasonable time array
     nn = round(1 / dw / dt)
-    tt = np.arange(-math.floor(nn / 2), math.ceil(nn / 2) - 1) * dt
+    tt = np.arange(-math.floor(nn / 2), math.ceil(nn / 2)) * dt
 
     rf_signal = rf.signal * np.exp(1j * rf.phase_offset + 2 * math.pi * full_freq_offset * rf.t)
-    rfs = np.interp(xp=rf.t - time_center, fp=rf_signal, x=tt)
+    rfs = np.interp(x=tt, xp=rf.t - time_center, fp=rf_signal, left=0, right=0)
     spectrum = np.fft.fftshift(np.fft.fft(np.fft.fftshift(rfs)))
-    w = np.arange(-math.floor(nn / 2), math.ceil(nn / 2) - 1) * dw
+    w = np.arange(-math.floor(nn / 2), math.ceil(nn / 2)) * dw
 
     w1 = __find_flank(w, spectrum, cutoff)
     w2 = __find_flank(w[::-1], spectrum[::-1], cutoff)
 
     bw = w2 - w1
+    fc = (w2 + w1) / 2
+
+    # Coarse STE scaling following MATLAB reference implementation.
+    s_ref = np.interp(fc, w, np.abs(spectrum))
+    if abs(s_ref) > np.finfo(float).eps:
+        spectrum = np.sin(2 * np.pi * dt * s_ref) * spectrum / s_ref
 
     if return_spectrum and not return_axis:
         return bw, spectrum
@@ -84,6 +90,5 @@ def calc_rf_bandwidth(
 def __find_flank(x, f, c):
     m = np.max(np.abs(f))
     f = np.abs(f) / m
-    i = np.argwhere(f > c)[0]
-
-    return x[i]
+    i = np.argwhere(f > c)[0].item()
+    return float(x[i])

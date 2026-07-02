@@ -41,31 +41,29 @@ def make_sinc_pulse(
     Parameters
     ----------
     flip_angle : float
-        Flip angle in radians (rad).
+        Flip angle in radians.
     apodization : float, default=0
         Apodization.
     center_pos : float, default=0.5
-        Position of RF peak between 0 and 1, where 0 means the beginning of the pulse and 1 means the end of the pulse.
+        Position of peak.5 (midway).
     delay : float, default=0
         Delay in seconds (s).
     duration : float, default=4e-3
         Duration in seconds (s).
     dwell : float, default=0
-        Temporal sampling step of waveform in seconds (s).
-        If set to 0, will use `system.rf_raster_time`.
     freq_offset : float, default=0
-        Frequency offset in hertz (Hz).
+        Frequency offset in Hertz (Hz).
     max_grad : float, default=0
-        Maximum gradient strength (Hz/m) of accompanying slice select trapezoidal event.
+        Maximum gradient strength of accompanying slice select trapezoidal event.
     max_slew : float, default=0
-        Maximum slew rate (Hz/m/s) of accompanying slice select trapezoidal event.
+        Maximum slew rate of accompanying slice select trapezoidal event.
     phase_offset : float, default=0
-        Phase offset in radians (rad).
+        Phase offset in Hertz (Hz).
     return_gz : bool, default=False
         Boolean flag to indicate if slice-selective gradient has to be returned.
     slice_thickness : float, default=0
-        Slice thickness in meters (m) of accompanying slice select trapezoidal event.
-        The slice thickness determines the area of the slice select event.
+        Slice thickness of accompanying slice select trapezoidal event. The slice thickness determines the area of the
+        slice select event.
     system : Opts, default=Opts()
         System limits. Default is a system limits object initialized to default values.
     time_bw_product : float, default=4
@@ -75,9 +73,9 @@ def make_sinc_pulse(
         Must be one of 'excitation', 'refocusing', 'inversion',
         'saturation', 'preparation', 'other', 'undefined'.
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm).
+        PPM frequency offset.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz).
+        PPM phase offset.
 
     See also `pypulseq.Sequence.sequence.Sequence.add_block()`.
 
@@ -167,6 +165,13 @@ def make_sinc_pulse(
 
         if rf.delay < (gz.rise_time + gz.delay):
             rf.delay = gz.rise_time + gz.delay
+
+    rf_amplitude = np.max(np.abs(rf.signal))
+    if hasattr(system, 'max_b1') and rf_amplitude > system.max_b1:
+        warn(
+            f'system maximum RF amplitude exceeded ({rf_amplitude / system.max_b1 * 100:.1f}%)',
+            stacklevel=2,
+        )
 
     # Following 2 lines of code are workarounds for numpy returning 3.14... for np.angle(-0.00...)
     negative_zero_indices = np.where(rf.signal == -0.0)

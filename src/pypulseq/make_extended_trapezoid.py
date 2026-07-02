@@ -37,17 +37,17 @@ def make_extended_trapezoid(
     convert_to_arbitrary : bool, default=False
         Boolean flag to indicate if the extended trapezoid gradient has to be converted into an arbitrary gradient.
     amplitudes : numpy.ndarray, default=09
-        Gradient values (Hz/m) defined at `times` time indices.
+        Values defined at `times` time indices.
     max_grad : float, default=0
-        Maximum gradient strength (Hz/m).
+        Maximum gradient strength.
     max_slew : float, default=0
-        Maximum slew rate (Hz/m/s).
+        Maximum slew rate.
     system : Opts, default=Opts()
         System limits.
     skip_check : bool, default=False
         Boolean flag to indicate if amplitude check is to be skipped.
     times : numpy.ndarray, default=np.zeros(1)
-        Time points (s) at which `amplitudes` defines amplitude values.
+        Time points at which `amplitudes` defines amplitude values.
 
     Returns
     -------
@@ -122,18 +122,11 @@ def make_extended_trapezoid(
         grad.waveform = amplitudes
         grad.delay = round(times[0] / system.grad_raster_time) * system.grad_raster_time
         grad.tt = times - grad.delay
-        grad.shape_dur = grad.tt[-1]
+        grad.shape_dur = round(grad.tt[-1] / system.grad_raster_time) * system.grad_raster_time
         grad.area = 0.5 * ((grad.tt[1:] - grad.tt[:-1]) * (grad.waveform[1:] + grad.waveform[:-1])).sum()
 
     grad.first = amplitudes[0]
     grad.last = amplitudes[-1]
-
-    slew = np.diff(grad.waveform) / np.diff(grad.tt)
-
-    if max(abs(slew)) > max_slew * (1 + eps):
-        raise ValueError(f'Slew rate violation {max(abs(slew)) / max_slew * 100:.2f}%')
-    if max(abs(grad.waveform)) > max_grad + eps:
-        raise ValueError(f'Gradient amplitude violation {max(abs(grad.waveform)) / max_grad * 100:.2f}%')
 
     if trace_enabled():
         grad.trace = trace()

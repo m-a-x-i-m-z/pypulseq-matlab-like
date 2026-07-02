@@ -11,8 +11,13 @@ from pypulseq.utils.siemens.readasc import readasc
 
 
 def calc_pns(
-    obj: Sequence, hardware: SimpleNamespace, time_range: Union[List[float], None] = None, do_plots: bool = True
+    obj: Sequence,
+    hardware: SimpleNamespace,
+    time_range: Union[List[float], None] = None,
+    do_plots: bool = True,
+    calcCNS: bool = False,
 ) -> Tuple[bool, np.ndarray, np.ndarray, np.ndarray]:
+    del calcCNS
     """
     Calculate PNS using safe model implementation by Szczepankiewicz and Witzel
     See http://github.com/filip-szczepankiewicz/safe_pns_prediction
@@ -80,8 +85,17 @@ def calc_pns(
         gw / obj.system.gamma, np.nan * np.ones(t.shape[0]), obj.grad_raster_time, hardware
     )  # the RF vector is unused in the code inside but it is zeropaded and exported ...
 
-    # use the exported RF vector to detect and undo zero-padding
-    pns_comp = 0.01 * pns_comp[~np.isfinite(res.rf[1:]), :]
+    # Use the exported RF vector to detect and undo zero-padding.
+    # MATLAB uses ~isfinite(res.rf). SAFE Python wrappers can return one
+    # additional leading element, so we align lengths defensively.
+    rf_mask = ~np.isfinite(np.asarray(res.rf))
+    if rf_mask.shape[0] == pns_comp.shape[0] + 1:
+        rf_mask = rf_mask[1:]
+    elif rf_mask.shape[0] > pns_comp.shape[0]:
+        rf_mask = rf_mask[: pns_comp.shape[0]]
+    elif rf_mask.shape[0] < pns_comp.shape[0]:
+        rf_mask = np.pad(rf_mask, (0, pns_comp.shape[0] - rf_mask.shape[0]), constant_values=False)
+    pns_comp = 0.01 * pns_comp[rf_mask, :]
 
     # calc pns_norm and the final ok/not_ok
     pns_norm = np.sqrt((pns_comp**2).sum(axis=1))

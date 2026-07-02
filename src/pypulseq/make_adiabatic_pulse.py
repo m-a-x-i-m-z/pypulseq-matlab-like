@@ -6,6 +6,7 @@ from warnings import warn
 import numpy as np
 
 from pypulseq import eps
+from pypulseq.calc_rf_bandwidth import calc_rf_bandwidth
 from pypulseq.calc_rf_center import calc_rf_center
 from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.opts import Opts
@@ -30,7 +31,7 @@ def make_adiabatic_pulse(
     return_gz: bool = False,
     slice_thickness: float = 0.0,
     system: Union[Opts, None] = None,
-    use: str = 'inversion',
+    use: str = 'undefined',
     freq_ppm: float = 0.0,
     phase_ppm: float = 0.0,
 ) -> Union[
@@ -91,32 +92,28 @@ def make_adiabatic_pulse(
         One of 'hypsec' or 'wurst' pulse types.
     adiabaticity : int, default=4
     bandwidth : int, default=40000
-        Pulse bandwidth in hertz (Hz).
+        Pulse bandwidth.
     beta : float, default=800.0
-        AM waveform parameter in radians per second (rad/s).
+        AM waveform parameter.
     delay : float, default=0
         Delay in seconds (s).
     duration : float, default=10e-3
-        Pulse duration in seconds (s).
+        Pulse time (s).
     dwell : float, default=None
-        Temporal sampling step of waveform in seconds (s). If set to None, will use `system.rf_raster_time`.
     freq_offset : float, default=0
-        Frequency offset in hertz (Hz).
     max_grad : float, default=None
-        Maximum gradient strength (Hz/m).
+        Maximum gradient strength.
     max_slew : float, default=None
-        Maximum slew rate (Hz/m/s).
+        Maximum slew rate.
     mu : float, default=4.9
         Constant determining amplitude of frequency sweep.
     n_fac : int, default=40
         Power to exponentiate to within AM term. ~20 or greater is typical.
     phase_offset : float, default=0
-        Phase offset in radians (rad).
+        Phase offset.
     return_gz : bool, default=False
         Boolean flag to indicate if the slice-selective gradient has to be returned.
     slice_thickness : float, default=0
-        Slice thickness in meters (m) of accompanying slice select trapezoidal event.
-        The slice thickness determines the area of the slice select event.
     system : Opts, default=Opts()
         System limits.
     use : str, default='inversion'
@@ -124,9 +121,9 @@ def make_adiabatic_pulse(
         Must be one of 'excitation', 'refocusing', 'inversion',
         'saturation', 'preparation', 'other', 'undefined'.
     freq_ppm : float, default=0
-        PPM frequency offset in parts per million (ppm).
+        PPM frequency offset.
     phase_ppm : float, default=0
-        PPM phase offset in radians per megahertz (rad/MHz).
+        PPM phase offset.
 
     Returns
     -------
@@ -202,12 +199,17 @@ def make_adiabatic_pulse(
 
     # Create the modulated signal
     signal = amp * amp_mod * np.exp(1j * phase_mod)
+    # Ensure exact zeros stay positive zero to match MATLAB phase handling
+    if np.any(amp_mod == 0):
+        signal = signal.copy()
+        signal[amp_mod == 0] = 0
 
     # Adjust the number of samples if needed
     if n_samples != n_raw:
         n_pad = n_raw - n_samples
-        pad_left = n_pad // 2
-        pad_right = n_pad - pad_left
+        # MATLAB places the larger pad on the left when Npad is odd.
+        pad_right = n_pad // 2
+        pad_left = n_pad - pad_right
         signal = np.pad(signal, (pad_left, pad_right), mode='constant')
         n_samples = n_raw
 
@@ -227,7 +229,10 @@ def make_adiabatic_pulse(
     rf.ringdown_time = system.rf_ringdown_time
     rf.delay = delay
     rf.center, _ = calc_rf_center(rf)
-    rf.use = use
+    if use != '':
+        rf.use = use
+    else:
+        rf.use = 'inversion'
     if rf.dead_time > rf.delay:
         warn(
             f'Specified RF delay {rf.delay * 1e6:.2f} us is less than the dead time {rf.dead_time * 1e6:.0f} us. Delay was increased to the dead time.',
@@ -240,9 +245,7 @@ def make_adiabatic_pulse(
         max_slew_slice_select = max_slew
 
         if pulse_type == 'hypsec':
-            bandwidth = mu * beta / np.pi
-        elif pulse_type == 'wurst':
-            bandwidth = bandwidth
+            bandwidth = calc_rf_bandwidth(rf, 0.1)
 
         center_pos, _ = calc_rf_center(rf)
 
@@ -259,7 +262,7 @@ def make_adiabatic_pulse(
         gzr = make_trapezoid(
             channel='z',
             system=system,
-            area=-area * (1 - center_pos) - 0.5 * (gz.area - area),
+            area=-area * (1 - center_pos / rf.shape_dur) - 0.5 * (gz.area - area),
             max_grad=max_grad_slice_select,
             max_slew=max_slew_slice_select,
         )

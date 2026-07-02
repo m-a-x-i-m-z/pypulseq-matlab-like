@@ -7,7 +7,7 @@ from pypulseq.opts import Opts
 def make_digital_output_pulse(
     channel: str,
     delay: float = 0.0,
-    duration: float = 4e-3,
+    duration: float = 0.0,
     system: Union[Opts, None] = None,
 ) -> SimpleNamespace:
     """

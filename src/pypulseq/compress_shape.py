@@ -54,6 +54,7 @@ def compress_shape(decompressed_shape: np.ndarray, force_compression: bool = Fal
     # Calculate indices of length elements and insert length values
     inds = np.cumsum(repeats) - 1
     v[inds[rl_gt1]] = lengths[rl_gt1] - 2
+    v[np.abs(v) < 1e-10] = 0
 
     compressed_shape = SimpleNamespace()
     compressed_shape.num_samples = len(decompressed_shape)

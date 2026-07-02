@@ -1,8 +1,6 @@
 from types import SimpleNamespace
 from typing import List
 
-import numpy as np
-
 
 def asc_to_acoustic_resonances(asc: dict) -> List[dict]:
     """
@@ -25,7 +23,15 @@ def asc_to_acoustic_resonances(asc: dict) -> List[dict]:
         freqs = asc['asGPAParameters'][0]['sGCParameters']['aflAcousticResonanceFrequency']
         bw = asc['asGPAParameters'][0]['sGCParameters']['aflAcousticResonanceBandwidth']
 
-    return [{'frequency': f, 'bandwidth': b} for f, b in zip(freqs.values(), bw.values(), strict=False) if f != 0]
+    # Preserve MATLAB-like index order from ASC vectors.
+    def _ordered_values(x):
+        if isinstance(x, dict):
+            return [x[k] for k in sorted(x.keys(), key=lambda t: int(t) if str(t).isdigit() else str(t))]
+        return list(x)
+
+    fv = _ordered_values(freqs)
+    bv = _ordered_values(bw)
+    return [{'frequency': f, 'bandwidth': b} for f, b in zip(fv, bv, strict=False) if f > 0]
 
 
 def asc_to_hw(asc: dict, cardiac_model: bool = False) -> SimpleNamespace:
@@ -47,21 +53,33 @@ def asc_to_hw(asc: dict, cardiac_model: bool = False) -> SimpleNamespace:
     """
     hw = SimpleNamespace()
 
-    if 'asCOMP' in asc and 'tName' in asc['asCOMP']:
-        hw.name = asc['asCOMP']['tName']
+    if 'asCOMP' in asc and asc['asCOMP'] is not None:
+        comp = asc['asCOMP']
+        if isinstance(comp, list) and len(comp) > 0 and isinstance(comp[0], dict) and 'tName' in comp[0]:
+            hw.name = comp[0]['tName']
+        elif isinstance(comp, dict) and 'tName' in comp:
+            hw.name = comp['tName']
+        else:
+            hw.name = 'unknown'
     else:
         hw.name = 'unknown'
 
-    if 'GradPatSup' in asc:
-        asc_pns = asc['GradPatSup']['Phys']['PNS']
-    else:
+    # MATLAB asc_to_hw compatibility logic from @Sequence/calcPNS.m:
+    # old format has flGSWDTauX at root; new format stores models under GradPatSup.Phys.
+    if 'flGSWDTauX' in asc:
         asc_pns = asc
-
-    if cardiac_model:
-        if 'GradPatSup' in asc and 'CarNS' in asc['GradPatSup']['Phys']:
-            asc_pns = asc['GradPatSup']['Phys']['CarNS']
+        if cardiac_model:
+            raise ValueError('provided .asc file does not support cardiac stimulation prediction')
+    elif 'GradPatSup' in asc:
+        phys = asc['GradPatSup']['Phys']
+        if cardiac_model:
+            if 'CarNS' not in phys:
+                raise ValueError('provided .asc file does not support cardiac stimulation prediction')
+            asc_pns = phys['CarNS']
         else:
-            return None
+            asc_pns = phys['PNS']
+    else:
+        raise ValueError('unknown .asc file format')
 
     hw.x = SimpleNamespace()
     hw.x.tau1 = asc_pns['flGSWDTauX'][0]  # ms
@@ -98,9 +116,8 @@ def asc_to_hw(asc: dict, cardiac_model: bool = False) -> SimpleNamespace:
         hw.y.g_scale = asc['asGPAParameters'][0]['sGCParameters']['flGScaleFactorY']
         hw.z.g_scale = asc['asGPAParameters'][0]['sGCParameters']['flGScaleFactorZ']
     else:
-        print('Warning: Gradient scale factors not in ASC file: assuming 1/pi')
-        hw.x.g_scale = 1 / np.pi
-        hw.y.g_scale = 1 / np.pi
-        hw.z.g_scale = 1 / np.pi
+        hw.x.g_scale = asc['flGCGScaleFactorX']
+        hw.y.g_scale = asc['flGCGScaleFactorY']
+        hw.z.g_scale = asc['flGCGScaleFactorZ']
 
     return hw

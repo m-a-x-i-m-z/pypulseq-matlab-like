@@ -1,7 +1,6 @@
 import math
-import warnings
 from types import SimpleNamespace
-from typing import Literal, Union
+from typing import Union
 
 from pypulseq import eps
 from pypulseq.opts import Opts
@@ -31,12 +30,6 @@ def calculate_shortest_params_for_area(area: float, max_slew: float, max_grad: f
     fall_time = rise_time
 
     return amplitude, rise_time, flat_time, fall_time
-
-
-def calculate_shortest_rise_time(amplitude: float, max_slew: float, grad_raster_time: float):
-    """Calculate the shortest possible rise / fall time for a given amplitude and slew rate."""
-
-    return math.ceil(max(abs(amplitude) / max_slew, grad_raster_time) / grad_raster_time) * grad_raster_time
 
 
 def make_trapezoid(
@@ -113,8 +106,6 @@ def make_trapezoid(
         If requested area is too large for this gradient
         If `flat_time`, `duration` and `area` are not supplied.
         Amplitude violation
-    NotImplementedError
-        If an input set that might be valid but not implemented is passed.
     """
     if system is None:
         system = Opts.default
@@ -122,120 +113,92 @@ def make_trapezoid(
     if channel not in ['x', 'y', 'z']:
         raise ValueError(f'Invalid channel. Must be one of `x`, `y` or `z`. Passed: {channel}')
 
-    if max_grad is None:
+    if max_grad is None or max_grad <= 0:
         max_grad = system.max_grad
 
-    if max_slew is None:
+    if max_slew is None or max_slew <= 0:
         max_slew = system.max_slew
 
-    # If either of rise_time or fall_time is not provided, set it to the other.
-    rise_time = rise_time or fall_time
-    fall_time = fall_time or rise_time
-
-    # Check which one of area, flat_area and amplitude is provided, and determine the calculation path accordingly.
-    calc_path: Literal['area', 'flat_area', 'amplitude']
-    if area is not None and flat_area is None and amplitude is None:
-        calc_path = 'area'
-    elif area is None and flat_area is not None and amplitude is None:
-        calc_path = 'flat_area'
-    elif area is None and flat_area is None and amplitude is not None:
-        calc_path = 'amplitude'
-    elif area is None and flat_area is not None and amplitude is not None:
-        raise NotImplementedError('Flat Area + Amplitude input pair is not implemented yet.')
-    elif area is not None and flat_area is None and amplitude is not None:
-        raise NotImplementedError('Amplitude + Area input pair is not implemented yet.')
-    else:
+    if fall_time is not None and rise_time is None:
+        raise ValueError("Must always supply `rise_time` if `fall_time` is specified explicitly.")
+    if area is None and flat_area is None and amplitude is None:
         raise ValueError("Must supply either 'area', 'flat_area' or 'amplitude'.")
-
-    # Check if sufficient timing parameters are provided.
-    if flat_time is not None and flat_area is None and amplitude is None and (rise_time is None or area is None):
+    if sum(x is None for x in (area, flat_area, amplitude)) != 2:
         raise ValueError(
-            'When `flat_time` is provided, either `flat_area`, '
-            'or `amplitude`, or `rise_time` and `area` must be provided as well.'
+            "Must supply either 'area', 'flat_area' or 'amplitude', and only one of the three may be specified."
         )
 
-    if calc_path == 'area':
-        # We have area and duration.
-        if duration is not None and flat_time is None:
-            if rise_time is None:
-                _, rise_time, flat_time, fall_time = calculate_shortest_params_for_area(
-                    area, max_slew, max_grad, system.grad_raster_time
-                )
-                min_duration = rise_time + flat_time + fall_time
-                assert duration >= min_duration, (
-                    f'Requested area is too large for this gradient. Minimum required duration is '
-                    f'{round(min_duration * 1e6)} us'
-                )
-
-                dc = 1 / abs(2 * max_slew) + 1 / abs(2 * max_slew)
-                amplitude2 = (duration - math.sqrt(duration**2 - 4 * abs(area) * dc)) / (2 * dc)
-            else:
-                if duration <= (rise_time + eps):
-                    raise ValueError('The `duration` is too short for the given `rise_time`.')
-
-                if fall_time is None:
-                    fall_time = rise_time
-
-                amplitude2 = area / (duration - 0.5 * rise_time - 0.5 * fall_time)
-                possible = duration >= (rise_time + fall_time) and abs(amplitude2) <= max_grad
-                assert possible, (
-                    f'Requested area is too large for this gradient. Probably amplitude is violated '
-                    f'{round(abs(amplitude2) / max_grad * 100)}'
-                )
-            flat_time = duration - rise_time - fall_time
-            amplitude2 = area / (rise_time / 2 + fall_time / 2 + flat_time)
-
-        elif flat_time is not None:
-            if rise_time is None:
-                raise ValueError('Must supply `rise_time` when `area` and `flat_time` is provided.')
-
-            amplitude2 = area / (rise_time + flat_time)
-
+    if flat_time is not None:
+        if amplitude is not None:
+            amplitude2 = amplitude
         else:
-            if rise_time is not None or fall_time is not None:
-                warnings.warn('Rise time and fall time is ignored when calculating the shortest duration from `area`.')
-
-            amplitude2, rise_time, flat_time, fall_time = calculate_shortest_params_for_area(
-                area, max_slew, max_grad, system.grad_raster_time
-            )
-
-    elif calc_path == 'flat_area':
-        # Check and raise invalid input sets
-        if duration is not None:
-            raise NotImplementedError('Flat Area + Duration input pair is not implemented yet.')
-        elif flat_time is not None:
+            if flat_area is None:
+                raise ValueError(
+                    "When 'flat_time' is provided either 'flat_area' or 'amplitude' must be provided as well."
+                )
             amplitude2 = flat_area / flat_time
 
-    elif calc_path == 'amplitude':
         if rise_time is None:
-            rise_time = abs(amplitude) / max_slew
+            rise_time = abs(amplitude2) / max_slew
             rise_time = math.ceil(rise_time / system.grad_raster_time) * system.grad_raster_time
             if rise_time == 0:
                 rise_time = system.grad_raster_time
+        if fall_time is None:
             fall_time = rise_time
 
-        amplitude2 = amplitude
-        if duration is not None and flat_time is None:
-            flat_time = duration - rise_time - fall_time
-        elif flat_time is not None and duration is None:
-            pass
+    elif duration is not None and duration > 0:
+        if amplitude is not None:
+            amplitude2 = amplitude
         else:
+            if area is None:
+                raise ValueError("Must supply area when duration is provided without amplitude.")
+            if rise_time is None:
+                d_c = 1 / abs(2 * max_slew) + 1 / abs(2 * max_slew)
+                possible = duration**2 > 4 * abs(area) * d_c
+                if not possible:
+                    _, t1, t2, t3 = calculate_shortest_params_for_area(area, max_slew, max_grad, system.grad_raster_time)
+                    raise ValueError(
+                        'Requested area is too large for this gradient. '
+                        f'Minimum required duration is {(t1 + t2 + t3) * 1e6} us'
+                    )
+                amplitude2 = (duration - math.sqrt(duration**2 - 4 * abs(area) * d_c)) / (2 * d_c)
+            else:
+                if fall_time is None:
+                    fall_time = rise_time
+                if duration <= 0.5 * rise_time + 0.5 * fall_time:
+                    raise ValueError('The `duration` is too short for the given `rise_time`.')
+                amplitude2 = area / (duration - 0.5 * rise_time - 0.5 * fall_time)
+                possible = duration >= (rise_time + fall_time) and abs(amplitude2) < max_grad
+                assert possible, (
+                    'Requested area is too large for this gradient duration. '
+                    f'Probably amplitude is violated ({round(abs(amplitude2) / max_grad * 100)}%)'
+                )
+
+        if rise_time is None:
+            rise_time = math.ceil(abs(amplitude2) / max_slew / system.grad_raster_time) * system.grad_raster_time
+            if rise_time == 0:
+                rise_time = system.grad_raster_time
+        if fall_time is None:
+            fall_time = rise_time
+
+        flat_time = duration - rise_time - fall_time
+        if amplitude is None:
+            amplitude2 = area / (rise_time / 2 + fall_time / 2 + flat_time)
+
+    else:
+        if area is None:
             raise ValueError('Must supply area or duration.')
-
-    if rise_time is None and fall_time is None:
-        rise_time = fall_time = calculate_shortest_rise_time(amplitude2, max_slew, system.grad_raster_time)
-
-    if abs(amplitude2) > max_grad + eps:
-        raise ValueError(f'Refined amplitude ({abs(amplitude2):0.0f} Hz/m) is larger than max ({max_grad:0.0f} Hz/m).')
-
-    if abs(amplitude2) / rise_time > max_slew * (1 + eps):
-        raise ValueError(
-            f'Refined slew rate ({abs(amplitude2) / rise_time:0.0f} Hz/m/s) for ramp up is larger than max ({max_slew:0.0f} Hz/m/s).'
+        amplitude2, rise_time, flat_time, fall_time = calculate_shortest_params_for_area(
+            area, max_slew, max_grad, system.grad_raster_time
         )
 
-    if abs(amplitude2) / fall_time > max_slew * (1 + eps):
+    if abs(amplitude2) > max_grad:
+        if area is None:
+            raise ValueError(f'Amplitude violation ({round(abs(amplitude2) / max_grad * 100)}%)')
+        _, t1, t2, t3 = calculate_shortest_params_for_area(area, max_slew, max_grad, system.grad_raster_time)
         raise ValueError(
-            f'Refined slew rate ({abs(amplitude2) / fall_time:0.0f} Hz/m/s) for ramp down is larger than max ({max_slew:0.0f} Hz/m/s).'
+            'Requested duration is too short for the area to be realized within system limits. '
+            f'Minimum duration is {(t1 + t2 + t3) * 1e6} us'
         )
 
     grad = SimpleNamespace()

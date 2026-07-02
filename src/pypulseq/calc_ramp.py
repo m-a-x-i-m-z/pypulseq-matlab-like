@@ -28,11 +28,11 @@ def calc_ramp(
     k_end : numpy.ndarray
         Two following points in k-space. Shape is `[3, 2]`. From these points, the target gradient will be calculated.
     max_grad : float or array_like, default=0
-        Maximum total gradient strength (Hz/m). Either a single value or one value for each coordinate, of shape `[3, 1]`.
+        Maximum total gradient strength. Either a single value or one value for each coordinate, of shape `[3, 1]`.
     max_points : int, default=500
         Maximum number of k-space points to be used in connecting `k0` and `k_end`.
     max_slew : float or array_like, default=0
-        Maximum total slew rate (Hz/m/s). Either a single value or one value for each coordinate, of shape `[3, 1]`.
+        Maximum total slew rate. Either a single value or one value for each coordinate, of shape `[3, 1]`.
     system : Opts, default=Opts()
         System limits.
     oversampling : bool, default=False
@@ -56,15 +56,17 @@ def calc_ramp(
 
     def __inside_limits(grad, slew):
         if mode == 0:
-            grad2 = np.sum(np.square(grad), axis=1)
-            slew2 = np.sum(np.square(slew), axis=1)
-            ok = np.all(np.max(grad2) <= np.square(max_grad)) and np.all(np.max(slew2) <= np.square(max_slew))
+            grad2 = np.sum(np.square(grad), axis=0)
+            slew2 = np.sum(np.square(slew), axis=0)
+            ok = np.all(np.max(grad2) <= np.square(max_grad)) and np.all(
+                np.max(slew2) <= np.square(max_slew)
+            )
         else:
-            ok = (np.sum(np.max(np.abs(grad), axis=1) <= max_grad) == 3) and (
-                np.sum(np.max(np.abs(slew), axis=1) <= max_slew) == 3
+            ok = (np.all(np.max(np.abs(grad), axis=1) <= max_grad)) and (
+                np.all(np.max(np.abs(slew), axis=1) <= max_slew)
             )
 
-        return ok
+        return bool(ok)
 
     def __joinleft0(k0, k_end, use_points, G0, G_end):
         if use_points == 0:
@@ -81,27 +83,26 @@ def calc_ramp(
         Gopt = (kopt - k0) / grad_raster
         Sopt = (Gopt - G0) / grad_raster
 
-        okGopt = np.sum(np.square(Gopt)) <= np.square(max_grad)
-        okSopt = np.sum(np.square(Sopt)) <= np.square(max_slew)
+        okGopt = bool(np.sum(np.square(Gopt)) <= np.square(max_grad))
+        okSopt = bool(np.sum(np.square(Sopt)) <= np.square(max_slew))
 
         if okGopt and okSopt:
             k_left = kopt
         else:
-            a = np.multiply(max_grad, grad_raster)
-            b = np.multiply(max_slew, grad_raster**2)
+            a = max_grad * grad_raster
+            b = max_slew * grad_raster**2
 
             dkprol = G0 * grad_raster
             dkconn = dk - dkprol
 
             ksl = k0 + dkprol + dkconn / np.linalg.norm(dkconn) * b
             Gsl = (ksl - k0) / grad_raster
-            okGsl = np.sum(np.square(Gsl)) <= np.square(max_grad)
+            okGsl = bool(np.sum(np.square(Gsl)) <= np.square(max_grad))
 
-            kgl = k0 + np.multiply(dk / np.linalg.norm(dk), a)
+            kgl = k0 + (dk / np.linalg.norm(dk)) * a
             Ggl = (kgl - k0) / grad_raster
             Sgl = (Ggl - G0) / grad_raster
-            okSgl = np.sum(np.square(Sgl)) <= np.square(max_slew)
-
+            okSgl = bool(np.sum(np.square(Sgl)) <= np.square(max_slew))
             if okGsl:
                 k_left = ksl
             elif okSgl:
@@ -111,12 +112,18 @@ def calc_ramp(
                 c1 = np.divide(np.square(a) - np.square(b) + np.square(c), (2 * c))
                 h = np.sqrt(np.square(a) - np.square(c1))
                 kglsl = k0 + np.multiply(c1, np.divide(dkprol, np.linalg.norm(dkprol)))
-                projondkprol = (kgl * dkprol.T) * (dkprol / np.linalg.norm(dkprol))
+                projondkprol = np.dot(kgl, dkprol) * (dkprol / np.square(np.linalg.norm(dkprol)))
                 hdirection = kgl - projondkprol
                 kglsl = kglsl + h * hdirection / np.linalg.norm(hdirection)
                 k_left = kglsl
 
-        success, k = __joinright0(k_left, k_end, (k_left - k0) / grad_raster, G_end, use_points - 1)
+        success, k = __joinright0(
+            k0=k_left,
+            k_end=k_end,
+            use_points=use_points - 1,
+            G0=(k_left - k0) / grad_raster,
+            G_end=G_end,
+        )
         if len(k) != 0:
             if len(k.shape) == 1:
                 k = k.reshape((len(k), 1))
@@ -155,7 +162,7 @@ def calc_ramp(
         Gsl = (ksl - k0) / grad_raster
         okGsl = np.abs(Gsl) <= max_grad
 
-        kgl = k0 + np.multiply(np.sign(dk), max_grad) * grad_raster**2
+        kgl = k0 + np.multiply(np.sign(dk), max_grad) * grad_raster
         Ggl = (kgl - k0) / grad_raster
         Sgl = (Ggl - G0) / grad_raster
         okSgl = np.abs(Sgl) <= max_slew
@@ -203,26 +210,26 @@ def calc_ramp(
         Gopt = (k_end - kopt) / grad_raster
         Sopt = (G_end - Gopt) / grad_raster
 
-        okGopt = np.sum(np.square(Gopt)) <= np.square(max_grad)
-        okSopt = np.sum(np.square(Sopt)) <= np.square(max_slew)
+        okGopt = bool(np.sum(np.square(Gopt)) <= np.square(max_grad))
+        okSopt = bool(np.sum(np.square(Sopt)) <= np.square(max_slew))
 
         if okGopt and okSopt:
             k_right = kopt
         else:
-            a = np.multiply(max_grad, grad_raster)
-            b = np.multiply(max_slew, grad_raster**2)
+            a = max_grad * grad_raster
+            b = max_slew * grad_raster**2
 
             dkprol = -G_end * grad_raster
             dkconn = dk - dkprol
 
             ksl = k_end + dkprol + dkconn / np.linalg.norm(dkconn) * b
             Gsl = (k_end - ksl) / grad_raster
-            okGsl = np.sum(np.square(Gsl)) <= np.square(max_grad)
+            okGsl = bool(np.sum(np.square(Gsl)) <= np.square(max_grad))
 
-            kgl = k_end + np.multiply(dk / np.linalg.norm(dk), a)
+            kgl = k_end + (dk / np.linalg.norm(dk)) * a
             Ggl = (k_end - kgl) / grad_raster
             Sgl = (G_end - Ggl) / grad_raster
-            okSgl = np.sum(np.square(Sgl)) <= np.square(max_slew)
+            okSgl = bool(np.sum(np.square(Sgl)) <= np.square(max_slew))
 
             if okGsl:
                 k_right = ksl
@@ -233,7 +240,7 @@ def calc_ramp(
                 c1 = np.divide(np.square(a) - np.square(b) + np.square(c), (2 * c))
                 h = np.sqrt(np.square(a) - np.square(c1))
                 kglsl = k_end + np.multiply(c1, np.divide(dkprol, np.linalg.norm(dkprol)))
-                projondkprol = (kgl * dkprol.T) * (dkprol / np.linalg.norm(dkprol))
+                projondkprol = np.dot(kgl, dkprol) * (dkprol / np.square(np.linalg.norm(dkprol)))
                 hdirection = kgl - projondkprol
                 kglsl = kglsl + h * hdirection / np.linalg.norm(hdirection)
                 k_right = kglsl
@@ -319,10 +326,15 @@ def calc_ramp(
     # =========
     # MAIN FUNCTION
     # =========
-    if np.all(np.where(max_grad <= 0)):
-        max_grad = [system.max_grad]
-    if np.all(np.where(max_slew <= 0)):
-        max_slew = [system.max_slew]
+    if max_grad is None or (np.isscalar(max_grad) and max_grad <= 0) or (not np.isscalar(max_grad) and np.all(max_grad <= 0)):
+        max_grad = system.max_grad
+    if max_slew is None or (np.isscalar(max_slew) and max_slew <= 0) or (not np.isscalar(max_slew) and np.all(max_slew <= 0)):
+        max_slew = system.max_slew
+
+    if np.isscalar(max_grad):
+        max_grad = np.array([max_grad])
+    if np.isscalar(max_slew):
+        max_slew = np.array([max_slew])
 
     if oversampling:
         grad_raster = 0.5 * system.grad_raster_time
@@ -331,6 +343,8 @@ def calc_ramp(
 
     if len(max_grad) == 1 and len(max_slew) == 1:
         mode = 0
+        max_grad = float(max_grad[0])
+        max_slew = float(max_slew[0])
     elif len(max_grad) == 3 and len(max_slew) == 3:
         mode = 1
     else:
@@ -349,11 +363,15 @@ def calc_ramp(
         if mode == 0:
             if np.linalg.norm(G0) > max_grad or np.linalg.norm(G_end) > max_grad:
                 break
-            success, k_out = __joinleft0(k0=k0, k_end=k_end, G0=G0, G_end=G_end, use_points=use_points)
+            success, k_out = __joinleft0(
+                k0=k0, k_end=k_end, G0=G0, G_end=G_end, use_points=use_points
+            )
         else:
-            if abs(G0) > abs(max_grad) or abs(G_end) > abs(max_grad):
+            if np.any(np.abs(G0) > max_grad) or np.any(np.abs(G_end) > max_grad):
                 break
-            success, k_out = __joinleft1(k0=k0, k_end=k_end, use_points=use_points, G0=G0, G_end=G_end)
+            success, k_out = __joinleft1(
+                k0=k0, k_end=k_end, use_points=use_points, G0=G0, G_end=G_end
+            )
         use_points += 1
 
-    return k_out, success
+    return k_out, bool(success)

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Tuple, Union
 
@@ -28,13 +29,13 @@ def split_gradient(
     Parameters
     ----------
     grad : SimpleNamespace
-        Gradient event to be split into three gradient waveforms.
+        Gradient event to be split into two gradient waveforms.
     system : Opts, default=Opts()
         System limits.
 
     Returns
     -------
-    grad1, grad2, grad3 : SimpleNamespace
+    grad1, grad2 : SimpleNamespace
         Split gradient waveforms.
 
     Raises
@@ -45,6 +46,9 @@ def split_gradient(
     """
     if system is None:
         system = Opts.default
+
+    # copy() to emulate pass-by-value; otherwise passed grad is modified
+    grad = deepcopy(grad)
 
     grad_raster_time = system.grad_raster_time
     total_length = calc_duration(grad)
@@ -92,7 +96,7 @@ def split_gradient(
 
         if trace_enabled():
             t = trace()
-            ramp_down.trace = t
+            ramp_up.trace = t
             flat_top.trace = t
             ramp_down.trace = t
 

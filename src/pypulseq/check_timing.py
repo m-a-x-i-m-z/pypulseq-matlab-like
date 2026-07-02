@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from typing import Any, List, Tuple
 
+import numpy as np
+
 from pypulseq import Sequence, eps
 from pypulseq.calc_duration import calc_duration
 from pypulseq.utils.tracing import format_trace
@@ -17,6 +19,7 @@ error_messages = {
     'SOFT_DELAY_DUR_INCONSISTENCY': 'Soft delay {hint}/{numID} default duration derived from this block ({value*1e6} us) is inconsistent with the previous default.',
     'SOFT_DELAY_HINT_INCONSISTENCY': 'Soft delay {hint}/{numID}: Soft delays with the same numeric ID are expected to share the same text hint but previous hint recorded is {prev_hint}.',
     'SOFT_DELAY_INVALID_NUMID': 'Soft delay {hint}/{numID} has an invalid numeric ID {numID}. Numeric IDs must be positive integers.',
+    'ADC_SAMPLES_DIVISOR': 'ADC num_samples is not an integer multiple of adc_samples_divisor ({value} / {divisor}).',
 }
 
 
@@ -29,7 +32,7 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
         """
         c = a / b
         c_rounded = round(c)
-        is_ok = abs(c - c_rounded) < 1e-6
+        is_ok = abs(c - c_rounded) < 1e-9
 
         if not is_ok:
             error_report.append(
@@ -46,6 +49,7 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
             )
 
     soft_delay_defaults = {}
+    soft_delay_hints_by_num = {}
 
     # Loop over all blocks
     for block_counter in seq.block_events:
@@ -74,19 +78,17 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
         for event, e in block.__dict__.items():
             if e is None or isinstance(e, (float, int)):  # Special handling for block_duration
                 continue
+            if isinstance(e, list):
+                if len(e) > 1:
+                    # For now this is only the case for arrays of extensions, but we cannot actually check extensions anyway...
+                    continue
+                if len(e) == 0:
+                    continue
+                e = e[0]
             elif not isinstance(e, (dict, SimpleNamespace)):
                 raise ValueError('Wrong data type of variable arguments, list[SimpleNamespace] expected.')
 
-            if isinstance(e, list) and len(e) > 1:
-                # For now this is only the case for arrays of extensions, but we cannot actually check extensions anyway...
-                continue
-
-            if hasattr(e, 'type') and e.type == 'rf':
-                raster = seq.system.rf_raster_time
-                raster_str = 'rf_raster_time'
-            elif hasattr(e, 'type') and e.type == 'adc':
-                # note that ADC samples must be on ADC raster time, but the ADC start time must be on RF raster time!
-                # see https://github.com/pulseq/pulseq/blob/master/doc%2Fpulseq_shapes_and_times.pdf for details
+            if hasattr(e, 'type') and e.type in ('rf', 'adc', 'output'):
                 raster = seq.system.rf_raster_time
                 raster_str = 'rf_raster_time'
             else:
@@ -107,7 +109,33 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
                 div_check(e.duration, raster, event=event, field='duration', raster=raster_str)
 
             if hasattr(e, 'dwell'):
+                if e.dwell < seq.system.adc_raster_time - eps:
+                    error_report.append(
+                        SimpleNamespace(
+                            block=block_counter,
+                            event=event,
+                            field='dwell',
+                            value=e.dwell,
+                            value_rounded=seq.system.adc_raster_time,
+                            error=e.dwell - seq.system.adc_raster_time,
+                            raster='adc_raster_time',
+                            error_type='RASTER',
+                        )
+                    )
                 div_check(e.dwell, seq.system.adc_raster_time, event=event, field='dwell', raster='adc_raster_time')
+                if hasattr(e, 'num_samples'):
+                    div = getattr(seq.system, 'adc_samples_divisor', 1)
+                    if div and abs(e.num_samples / div - round(e.num_samples / div)) > eps:
+                        error_report.append(
+                            SimpleNamespace(
+                                block=block_counter,
+                                event=event,
+                                field='num_samples',
+                                error_type='ADC_SAMPLES_DIVISOR',
+                                value=e.num_samples,
+                                divisor=div,
+                            )
+                        )
 
             if hasattr(e, 'type') and e.type == 'trap':
                 div_check(
@@ -119,6 +147,37 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
                 div_check(
                     e.fall_time, seq.system.grad_raster_time, event=event, field='fall_time', raster='grad_raster_time'
                 )
+            if hasattr(e, 'type') and e.type == 'rf':
+                if hasattr(e, 'shape_dur'):
+                    div_check(e.shape_dur, seq.system.rf_raster_time, event=event, field='shape_dur', raster='rf_raster_time')
+
+                if hasattr(e, 't') and len(e.t) >= 4:
+                    rt = np.asarray(e.t) / seq.system.rf_raster_time
+                    drt = np.diff(rt)
+                    if np.all(np.abs(drt[1:] - drt[0]) < 1e-9 / seq.system.rf_raster_time):
+                        dwell = e.t[1] - e.t[0]
+                        div_check(
+                            dwell,
+                            min(seq.system.adc_raster_time, seq.system.rf_raster_time),
+                            event=event,
+                            field='dwell',
+                            raster='min(adc_raster_time,rf_raster_time)',
+                        )
+                    elif np.any(np.abs(rt - np.round(rt)) > 1e-6):
+                        # MATLAB flags this as invalid RF timing for extended-shape RF definitions.
+                        max_err = np.max(np.abs(rt - np.round(rt))) * seq.system.rf_raster_time
+                        error_report.append(
+                            SimpleNamespace(
+                                block=block_counter,
+                                event=event,
+                                field='t',
+                                value=max_err,
+                                value_rounded=0.0,
+                                error=max_err,
+                                raster='rf_raster_time',
+                                error_type='RASTER',
+                            )
+                        )
 
         # Check RF dead times
         if block.rf is not None:
@@ -175,25 +234,46 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
                         dead_time=seq.system.adc_dead_time,
                     )
                 )
-        if block.soft_delay is not None:
-            if block.soft_delay.factor == 0:
+        soft_delay = getattr(block, 'soft_delay', None)
+        if soft_delay is not None:
+            num_id_raw = getattr(soft_delay, 'numID', None)
+            try:
+                num_id = int(float(num_id_raw))
+            except (TypeError, ValueError):
+                num_id = None
+
+            if num_id is None or num_id <= 0:
+                error_report.append(
+                    SimpleNamespace(
+                        block=block_counter,
+                        event='soft_delay',
+                        field='delay',
+                        error_type='SOFT_DELAY_INVALID_NUMID',
+                        value=num_id_raw,
+                        hint=soft_delay.hint,
+                        numID=num_id_raw,
+                    )
+                )
+                continue
+
+            if soft_delay.factor == 0:
                 error_report.append(
                     SimpleNamespace(
                         block=block_counter,
                         event='soft_delay',
                         field='delay',
                         error_type='SOFT_DELAY_FACTOR',
-                        value=block.soft_delay.factor,
-                        hint=block.soft_delay.hint,
-                        numID=block.soft_delay.numID,
+                        value=soft_delay.factor,
+                        hint=soft_delay.hint,
+                        numID=num_id,
                     )
                 )
             # Calculate default delay based on the current block duration
-            default_delay = (seq.block_durations[block_counter] - block.soft_delay.offset) * block.soft_delay.factor
-            if block.soft_delay.numID not in soft_delay_defaults:
-                soft_delay_defaults[block.soft_delay.numID] = default_delay
+            default_delay = (seq.block_durations[block_counter] - float(soft_delay.offset)) * float(soft_delay.factor)
+            if num_id not in soft_delay_defaults:
+                soft_delay_defaults[num_id] = default_delay
             elif (
-                abs(default_delay - soft_delay_defaults[block.soft_delay.numID])
+                abs(default_delay - soft_delay_defaults[num_id])
                 > 1e-7  # 0.1 μs threshold for duration consistency
             ):
                 error_report.append(
@@ -203,8 +283,24 @@ def check_timing(seq: Sequence) -> Tuple[bool, List[SimpleNamespace]]:
                         field='delay',
                         error_type='SOFT_DELAY_DUR_INCONSISTENCY',
                         value=default_delay,
-                        hint=block.soft_delay.hint,
-                        numID=block.soft_delay.numID,
+                        hint=soft_delay.hint,
+                        numID=num_id,
+                    )
+                )
+
+            if num_id not in soft_delay_hints_by_num:
+                soft_delay_hints_by_num[num_id] = soft_delay.hint
+            elif soft_delay_hints_by_num[num_id] != soft_delay.hint:
+                error_report.append(
+                    SimpleNamespace(
+                        block=block_counter,
+                        event='soft_delay',
+                        field='delay',
+                        error_type='SOFT_DELAY_HINT_INCONSISTENCY',
+                        value=soft_delay.hint,
+                        hint=soft_delay.hint,
+                        prev_hint=soft_delay_hints_by_num[num_id],
+                        numID=num_id,
                     )
                 )
 

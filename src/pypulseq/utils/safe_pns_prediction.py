@@ -39,6 +39,7 @@ from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.signal import convolve as scipy_convolve
 
 
 def safe_example_hw():
@@ -283,7 +284,8 @@ def safe_tau_lowpass(dgdt, tau, dt, eps=1e-16):
     filt = (1 - alpha) ** np.arange(n)
 
     # Implements lowpass filter using convolution to get rid of for loop in original code
-    return alpha * np.convolve(dgdt, filt)[: dgdt.shape[0]]
+    # return alpha * np.convolve(dgdt, filt)[: dgdt.shape[0]]
+    return alpha * scipy_convolve(dgdt, filt)[: dgdt.shape[0]]
 
 
 def safe_gwf_to_pns(gwf, rf, dt, hw, do_padding=True):

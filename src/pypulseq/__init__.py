@@ -5,8 +5,7 @@ import numpy as np
 # =========
 # VERSION
 # =========
-__version__ = importlib.metadata.version("pypulseq")
-
+__version__ = "1.5.1"
 
 # =========
 # BANKER'S ROUNDING FIX
@@ -34,12 +33,17 @@ eps = 10 ** np.floor(np.log10(np.spacing(1e6) * 10))  # this is 1e-9 for np.floa
 # =========
 from pypulseq.SAR.SAR_calc import calc_SAR
 from pypulseq.Sequence.sequence import Sequence
+from pypulseq.TransformFOV.transform_fov import transform_fov
 from pypulseq.add_gradients import add_gradients
+from pypulseq.add_ramps import add_ramps
 from pypulseq.align import align
+from pypulseq.block_to_events import block_to_events
 from pypulseq.calc_duration import calc_duration
 from pypulseq.calc_ramp import calc_ramp
 from pypulseq.calc_rf_bandwidth import calc_rf_bandwidth
 from pypulseq.calc_rf_center import calc_rf_center
+from pypulseq.calc_rf_power import calc_rf_power
+from pypulseq.convert import convert
 from pypulseq.make_adc import make_adc, calc_adc_segments
 from pypulseq.make_adiabatic_pulse import make_adiabatic_pulse
 from pypulseq.make_arbitrary_grad import make_arbitrary_grad
@@ -51,7 +55,11 @@ from pypulseq.make_digital_output_pulse import make_digital_output_pulse
 from pypulseq.make_extended_trapezoid import make_extended_trapezoid
 from pypulseq.make_extended_trapezoid_area import make_extended_trapezoid_area
 from pypulseq.make_gauss_pulse import make_gauss_pulse
+from pypulseq.make_hexagon_gradient_area import make_hexagon_gradient_area
 from pypulseq.make_label import make_label
+from pypulseq.make_rf_shim import make_rf_shim
+from pypulseq.make_rotation import make_rotation
+from pypulseq.make_slr_pulse import make_slr_pulse
 from pypulseq.make_sinc_pulse import make_sinc_pulse
 from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.sigpy_pulse_opts import SigpyPulseOpts
@@ -59,9 +67,11 @@ from pypulseq.make_trigger import make_trigger
 from pypulseq.opts import Opts
 from pypulseq.points_to_waveform import points_to_waveform
 from pypulseq.rotate import rotate
+from pypulseq.restore_additional_shape_samples import restore_additional_shape_samples
 from pypulseq.scale_grad import scale_grad
+from pypulseq.sim_rf import sim_rf
 from pypulseq.split_gradient import split_gradient
 from pypulseq.split_gradient_at import split_gradient_at
-from pypulseq.supported_labels_rf_use import get_supported_labels
+from pypulseq.supported_labels_rf_use import add_supported_label, get_supported_labels
 from pypulseq.traj_to_grad import traj_to_grad
 from pypulseq.utils.tracing import enable_trace, disable_trace

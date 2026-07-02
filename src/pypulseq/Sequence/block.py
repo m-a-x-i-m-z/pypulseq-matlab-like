@@ -1,8 +1,11 @@
 import math
+import numbers
 from types import SimpleNamespace
 from typing import List, Tuple, Union
+from warnings import warn
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 from pypulseq import eps
 from pypulseq.block_to_events import block_to_events
@@ -47,127 +50,246 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
     """
     events = block_to_events(*args)
     new_block = np.zeros(7, dtype=np.int32)
-    duration = 0
+    duration = 0.0
+    required_duration = None
+    round_up_block_duration = False
+    rot_quaternion = None
 
-    check_g = {
-        0: SimpleNamespace(idx=2, start=(0, 0), stop=(0, 0)),
-        1: SimpleNamespace(idx=3, start=(0, 0), stop=(0, 0)),
-        2: SimpleNamespace(idx=4, start=(0, 0), stop=(0, 0)),
-    }  # Key-value mapping of index and  pairs of gradients/times
+    check_g = [None, None, None]
     extensions = []
+    sequence_id = id(self)
+
+    def get_cached_registration(event: SimpleNamespace, cache_key=None):
+        cache = getattr(event, '_pypulseq_sequence_event_cache', None)
+        if cache is None:
+            return None
+
+        seq_cache = cache.get(sequence_id)
+        if seq_cache is None:
+            return None
+
+        key = cache_key if cache_key is not None else ('__default__',)
+        return seq_cache.get(key)
+
+    def set_cached_registration(event: SimpleNamespace, cache_key=None, **values) -> None:
+        cache = getattr(event, '_pypulseq_sequence_event_cache', None)
+        if cache is None:
+            cache = {}
+            setattr(event, '_pypulseq_sequence_event_cache', cache)
+        seq_cache = cache.setdefault(sequence_id, {})
+        key = cache_key if cache_key is not None else ('__default__',)
+        seq_cache[key] = values
+
+    def cache_value(value):
+        if isinstance(value, np.ndarray):
+            value = np.ascontiguousarray(value)
+            return (str(value.dtype), value.shape, value.tobytes())
+        if isinstance(value, np.generic):
+            value = value.item()
+        if isinstance(value, float):
+            return ('float', value.hex())
+        if isinstance(value, (list, tuple)):
+            return tuple(cache_value(item) for item in value)
+        return value
+
+    def event_cache_key(event: SimpleNamespace, *field_names):
+        return tuple((field_name, cache_value(getattr(event, field_name, None))) for field_name in field_names)
 
     for event in events:
-        if not isinstance(event, float):  # If event is not a block duration
-            if event.type == 'rf':
-                if new_block[1] != 0:
-                    raise ValueError('Multiple RF events were specified in set_block')
+        if isinstance(event, str):
+            if event == 'roundUpBlockDuration':
+                round_up_block_duration = True
+                continue
+            warn(f'Unknown parameter passed to block {block_index}', stacklevel=2)
+            continue
 
-                if hasattr(event, 'id'):
-                    rf_id = event.id
-                else:
-                    rf_id, _ = register_rf_event(self, event)
-
-                new_block[1] = rf_id
-                duration = max(duration, event.shape_dur + event.delay + event.ringdown_time)
-
-                if trace_enabled() and hasattr(event, 'trace'):
-                    self.block_trace[block_index].rf = event.trace
-            elif event.type == 'grad':
-                channel_num = ['x', 'y', 'z'].index(event.channel)
-                idx = 2 + channel_num
-
-                if new_block[idx] != 0:
-                    raise ValueError(f'Multiple {event.channel.upper()} gradient events were specified in set_block')
-
-                grad_start = (
-                    event.delay + math.floor(event.tt[0] / self.grad_raster_time + 1e-10) * self.grad_raster_time
-                )
-                grad_duration = (
-                    event.delay + math.ceil(event.tt[-1] / self.grad_raster_time - 1e-10) * self.grad_raster_time
-                )
-
-                check_g[channel_num] = SimpleNamespace()
-                check_g[channel_num].idx = idx
-                check_g[channel_num].start = (grad_start, event.first)
-                check_g[channel_num].stop = (grad_duration, event.last)
-
-                if hasattr(event, 'id'):
-                    grad_id = event.id
-                else:
-                    grad_id, _ = register_grad_event(self, event)
-
-                new_block[idx] = grad_id
-                duration = max(duration, grad_duration)
-
-                if trace_enabled() and hasattr(event, 'trace'):
-                    setattr(self.block_trace[block_index], 'g' + event.channel, event.trace)
-            elif event.type == 'trap':
-                channel_num = ['x', 'y', 'z'].index(event.channel)
-                idx = 2 + channel_num
-
-                if new_block[idx] != 0:
-                    raise ValueError(f'Multiple {event.channel.upper()} gradient events were specified in set_block')
-
-                if hasattr(event, 'id'):
-                    trap_id = event.id
-                else:
-                    trap_id = register_grad_event(self, event)
-
-                new_block[idx] = trap_id
-                duration = max(duration, event.delay + event.rise_time + event.flat_time + event.fall_time)
-
-                if trace_enabled() and hasattr(event, 'trace'):
-                    setattr(self.block_trace[block_index], 'g' + event.channel, event.trace)
-            elif event.type == 'adc':
-                if new_block[5] != 0:
-                    raise ValueError('Multiple ADC events were specified in set_block')
-
-                if hasattr(event, 'id'):
-                    adc_id = event.id
-                else:
-                    adc_id, _ = register_adc_event(self, event)
-
-                new_block[5] = adc_id
-                duration = max(duration, event.delay + event.num_samples * event.dwell + event.dead_time)
-
-                if trace_enabled() and hasattr(event, 'trace'):
-                    self.block_trace[block_index].adc = event.trace
-            elif event.type == 'delay':
-                duration = max(duration, event.delay)
-            elif event.type in ['output', 'trigger']:
-                if hasattr(event, 'id'):
-                    event_id = event.id
-                else:
-                    event_id = register_control_event(self, event)
-
-                ext = {'type': self.get_extension_type_ID('TRIGGERS'), 'ref': event_id}
-                extensions.append(ext)
-                duration = max(duration, event.delay + event.duration)
-            elif event.type in ['labelset', 'labelinc']:
-                if hasattr(event, 'id'):
-                    label_id = event.id
-                else:
-                    label_id = register_label_event(self, event)
-
-                ext = {
-                    'type': self.get_extension_type_ID(event.type.upper()),
-                    'ref': label_id,
-                }
-                extensions.append(ext)
-            elif event.type == 'soft_delay':
-                if hasattr(event, 'id'):
-                    event_id = event.id
-                else:
-                    event_id = register_soft_delay_event(self, event)
-
-                duration = max(duration, event.default_duration)
-                ext = {'type': self.get_extension_type_ID('DELAYS'), 'ref': event_id}
-                extensions.append(ext)
+        if isinstance(event, numbers.Real):
+            numeric_value = float(event)
+            if required_duration is None:
+                required_duration = numeric_value
             else:
-                raise ValueError(f'Unknown event type {event.type} passed to set_block().')
+                raise ValueError('More than one numeric parameter given to set_block()')
+            duration = max(duration, numeric_value)
+            continue
+
+        if event.type == 'rf':
+            if new_block[1] != 0:
+                raise ValueError('Multiple RF events were specified in set_block')
+
+            cache_key = event_cache_key(
+                event,
+                'signal',
+                't',
+                'center',
+                'delay',
+                'freq_ppm',
+                'phase_ppm',
+                'freq_offset',
+                'phase_offset',
+                'use',
+            )
+            cache = get_cached_registration(event, cache_key)
+            if cache is not None and 'id' in cache:
+                rf_id = cache['id']
+            else:
+                rf_id, shape_IDs = register_rf_event(self, event)
+                set_cached_registration(event, cache_key, id=rf_id, shape_IDs=shape_IDs)
+
+            new_block[1] = rf_id
+            duration = max(duration, event.shape_dur + event.delay + event.ringdown_time)
+
+            if trace_enabled() and hasattr(event, 'trace'):
+                self.block_trace[block_index].rf = event.trace
+        elif event.type == 'grad':
+            channel_num = ['x', 'y', 'z'].index(event.channel)
+            idx = 2 + channel_num
+
+            if new_block[idx] != 0:
+                raise ValueError(
+                    f'Trying to add more than one gradient per axis on axis {event.channel} in block {block_index}'
+                )
+
+            grad_start = event.delay + math.floor(event.tt[0] / self.grad_raster_time + 1e-10) * self.grad_raster_time
+            grad_duration = event.delay + math.ceil(event.tt[-1] / self.grad_raster_time - 1e-10) * self.grad_raster_time
+
+            check_g[channel_num] = SimpleNamespace(idx=idx, start=(grad_start, event.first), stop=(grad_duration, event.last))
+
+            cache_key = event_cache_key(
+                event,
+                'waveform',
+                'tt',
+                'first',
+                'last',
+                'delay',
+            )
+            cache = get_cached_registration(event, cache_key)
+            if cache is not None and 'id' in cache:
+                grad_id = cache['id']
+            else:
+                grad_id, shape_IDs = register_grad_event(self, event)
+                set_cached_registration(event, cache_key, id=grad_id, shape_IDs=shape_IDs)
+
+            new_block[idx] = grad_id
+            duration = max(duration, grad_duration)
+
+            if trace_enabled() and hasattr(event, 'trace'):
+                setattr(self.block_trace[block_index], 'g' + event.channel, event.trace)
+        elif event.type == 'trap':
+            channel_num = ['x', 'y', 'z'].index(event.channel)
+            idx = 2 + channel_num
+
+            if new_block[idx] != 0:
+                raise ValueError(
+                    f'Trying to add more than one gradient per axis on axis {event.channel} in block {block_index}'
+                )
+
+            cache_key = event_cache_key(
+                event,
+                'amplitude',
+                'rise_time',
+                'flat_time',
+                'fall_time',
+                'delay',
+            )
+            cache = get_cached_registration(event, cache_key)
+            if cache is not None and 'id' in cache:
+                trap_id = cache['id']
+            else:
+                trap_id = register_grad_event(self, event)
+                set_cached_registration(event, cache_key, id=trap_id)
+
+            new_block[idx] = trap_id
+            duration = max(duration, event.delay + event.rise_time + event.flat_time + event.fall_time)
+
+            if trace_enabled() and hasattr(event, 'trace'):
+                setattr(self.block_trace[block_index], 'g' + event.channel, event.trace)
+        elif event.type == 'adc':
+            if new_block[5] != 0:
+                raise ValueError('Multiple ADC events were specified in set_block')
+
+            cache_key = event_cache_key(
+                event,
+                'num_samples',
+                'dwell',
+                'delay',
+                'dead_time',
+                'freq_ppm',
+                'phase_ppm',
+                'freq_offset',
+                'phase_offset',
+                'phase_modulation',
+            )
+            cache = get_cached_registration(event, cache_key)
+            if cache is not None and 'id' in cache:
+                adc_id = cache['id']
+            else:
+                adc_id, shape_id = register_adc_event(self, event)
+                set_cached_registration(event, cache_key, id=adc_id, shape_id=shape_id)
+
+            new_block[5] = adc_id
+            duration = max(duration, event.delay + event.num_samples * event.dwell + event.dead_time)
+
+            if trace_enabled() and hasattr(event, 'trace'):
+                self.block_trace[block_index].adc = event.trace
+        elif event.type == 'delay':
+            # MATLAB behavior in v1.5.x: delay contributes only to block duration,
+            # it is not stored as a standalone delay event in new_block(1).
+            duration = max(duration, event.delay)
+        elif event.type in ['output', 'trigger']:
+            if hasattr(event, 'id'):
+                event_id = event.id
+            else:
+                event_id = register_control_event(self, event)
+
+            ext = {'type': self.get_extension_type_ID('TRIGGERS'), 'ref': event_id}
+            extensions.append(ext)
+            duration = max(duration, event.delay + event.duration)
+        elif event.type in ['labelset', 'labelinc']:
+            if hasattr(event, 'id'):
+                label_id = event.id
+            else:
+                label_id = register_label_event(self, event)
+
+            ext = {
+                'type': self.get_extension_type_ID(event.type.upper()),
+                'ref': label_id,
+            }
+            extensions.append(ext)
+        elif event.type == 'soft_delay':
+            if hasattr(event, 'id'):
+                event_id = event.id
+            else:
+                event_id = register_soft_delay_event(self, event)
+
+            duration = max(duration, event.default_duration)
+            ext = {'type': self.get_extension_type_ID('DELAYS'), 'ref': event_id}
+            extensions.append(ext)
+        elif event.type == 'rot3D':
+            if rot_quaternion is not None:
+                raise ValueError("Only one 'rotation' extension event can be added per block")
+            rot_quaternion = np.asarray(event.rot_quaternion, dtype=float).flatten()
+            if hasattr(event, 'id'):
+                event_id = event.id
+            else:
+                cache = get_cached_registration(event)
+                if cache is not None and 'id' in cache:
+                    event_id = cache['id']
+                else:
+                    event_id = self.register_rotation_event(event)
+                    set_cached_registration(event, id=event_id)
+
+            ext = {'type': self.get_extension_type_ID('ROTATIONS'), 'ref': event_id}
+            extensions.append(ext)
+        elif event.type == 'rf_shim':
+            if hasattr(event, 'id'):
+                event_id = event.id
+            else:
+                event_id = self.register_rf_shim_event(event)
+
+            ext = {'type': self.get_extension_type_ID('RF_SHIMS'), 'ref': event_id}
+            extensions.append(ext)
         else:
-            # Delay given as floating number (internal use only, e.g., from get_block())
-            duration = max(duration, event)
+            raise ValueError(f'Unknown event type {event.type} passed to set_block().')
 
     # =========
     # ADD EXTENSIONS
@@ -179,91 +301,100 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
         mapping then... The trick is that we rely on the sorting of the extension IDs and then we can always find the
         last one in the list by setting the reference to the next to 0 and then proceed with the other elements.
         """
-        sort_idx = np.argsort([e['ref'] for e in extensions])
-        extensions = np.take(extensions, sort_idx)
-        all_found = True
+        # Build chain by sorting by label reference ID (ascending) and iterating FORWARDS.
+        # This matches MATLAB behavior where smaller label IDs (like LIN) are at the tail.
+        extensions = sorted(extensions, key=lambda e: e['ref'])
+
         extension_id = 0
         for i in range(len(extensions)):
             data = (extensions[i]['type'], extensions[i]['ref'], extension_id)
-            extension_id, found = self.extensions_library.find(data)
-            all_found = all_found and found
-            if not found:
-                break
-
-        if not all_found:
-            # Add the list
-            extension_id = 0
-            for i in range(len(extensions)):
-                data = (extensions[i]['type'], extensions[i]['ref'], extension_id)
-                extension_id, found = self.extensions_library.find(data)
-                if not found:
-                    self.extensions_library.insert(extension_id, data)
+            extension_id, _ = self.extensions_library.find_or_insert(new_data=data)
 
         # Sanity checks for the soft delays
-        if 'DELAYS' in self.extension_string_idx:
-            n_soft_delays = sum([1 for e in extensions if e['type'] == self.get_extension_type_ID('DELAYS')])
-            if n_soft_delays:
-                if n_soft_delays > 1:
-                    raise RuntimeError('Only one soft delay extension is allowed per block.')
-                if not duration:
-                    raise RuntimeError(
-                        'Soft delay extension can only be used in conjunction with blocks of non-zero duration.'
-                    )  # otherwise the gradient checks get tedious
-                if new_block[1:5].any():
-                    raise RuntimeError(
-                        'Soft delay extension can only be used in empty blocks (blocks containing no conventional events such as RF, adc or gradients).'
-                    )
+        # Match MATLAB behavior: unconditionally register 'DELAYS' type ID when any extension is present
+        # (MATLAB setBlock calls getExtensionTypeID('DELAYS') unconditionally at this point)
+        n_soft_delays = sum([1 for e in extensions if e['type'] == self.get_extension_type_ID('DELAYS')])
+        if n_soft_delays:
+            if n_soft_delays > 1:
+                raise RuntimeError('Only one soft delay extension is allowed per block.')
+            if duration == 0 and required_duration is None:
+                raise RuntimeError(
+                    'Soft delay extension can only be used in conjunction with blocks of non-zero duration.'
+                )  # otherwise the gradient checks get tedious
+            if new_block[1:6].any():
+                raise RuntimeError(
+                    'Soft delay extension can only be used in empty blocks (blocks containing no conventional events such as RF, adc or gradients).'
+                )
         # Now we add the ID
         new_block[6] = extension_id
 
     # =========
     # PERFORM GRADIENT CHECKS
     # =========
-    for grad_to_check in check_g.values():
-        if abs(grad_to_check.start[1]) > self.system.max_slew * self.system.grad_raster_time:  # noqa: SIM102
-            if grad_to_check.start[0] > eps:
-                raise RuntimeError('No delay allowed for gradients which start with a non-zero amplitude')
+    if duration > 0:
+        if round_up_block_duration:
+            duration = math.ceil(duration / self.system.block_duration_raster) * self.system.block_duration_raster
 
-        # Check whether any blocks exist in the sequence
-        if self.next_free_block_ID > 1:
-            # Look up the previous block (and the next block in case of a set_block call)
-            if block_index == self.next_free_block_ID:
-                # New block inserted
-                prev_block_index = next(reversed(self.block_events))
-                next_block_index = None
-            else:
-                blocks = list(self.block_events)
-                try:
-                    # Existing block overwritten
-                    idx = blocks.index(block_index)
-                    prev_block_index = blocks[idx - 1] if idx > 0 else None
-                    next_block_index = blocks[idx + 1] if idx < len(blocks) - 1 else None
-                except ValueError:
-                    # Inserting a new block with non-contiguous numbering
-                    prev_block_index = next(reversed(self.block_events))
-                    next_block_index = None
+        grad_check_data = self.grad_check_data
+        slew_eps = self.system.max_slew * self.system.grad_raster_time
+        next_block_index = None
+        # Performance: in the common append path (add_block), block_index is not
+        # in block_events yet, so there is no "next block" to validate against.
+        # Avoid building/scanning a key list on every append.
+        if block_index in self.block_events:
+            blocks = list(self.block_events)
+            idx = blocks.index(block_index)
+            next_block_index = blocks[idx + 1] if idx < len(blocks) - 1 else None
 
-            # Look up the last gradient value in the previous block
-            last = 0
-            if prev_block_index is not None:
-                prev_id = self.block_events[prev_block_index][grad_to_check.idx]
-                if prev_id != 0:
-                    prev_lib = self.grad_library.get(prev_id)
-                    prev_type = prev_lib['type']
+        if block_index > 1 and grad_check_data['validForBlockNum'] != block_index - 1:
+            grad_check_data['validForBlockNum'] = block_index - 1
+            grad_check_data['lastGradVals'][:] = 0
 
-                    if prev_type == 't':
-                        last = 0
-                    elif prev_type == 'g':
-                        last = prev_lib['data'][2]  # v150: changed from ['data'][5] to ['data'][2]
+            prev_nonempty_block = None
+            for prev_idx, prev_dur in self.block_durations.items():
+                if prev_idx < block_index and prev_dur > 0:
+                    if prev_nonempty_block is None or prev_idx > prev_nonempty_block:
+                        prev_nonempty_block = prev_idx
 
-            # Check whether the difference between the last gradient value and
-            # the first value of the new gradient is achievable with the
-            # specified slew rate.
-            if abs(last - grad_to_check.start[1]) > self.system.max_slew * self.system.grad_raster_time:
-                raise RuntimeError('Two consecutive gradients need to have the same amplitude at the connection point')
+            if prev_nonempty_block is not None:
+                for i in range(3):
+                    prev_id = self.block_events[prev_nonempty_block][i + 2]
+                    if prev_id != 0:
+                        prev_lib = self.grad_library.get(prev_id)
+                        if prev_lib['type'] == 'g':
+                            grad_check_data['lastGradVals'][i] = prev_lib['data'][2]
 
-            # Look up the first gradient value in the next block
-            # (this only happens when using set_block to patch a block)
+        if rot_quaternion is not None:
+            # scipy Rotation uses [x, y, z, w], while Pulseq stores [w, x, y, z].
+            rot_obj = Rotation.from_quat(
+                [rot_quaternion[1], rot_quaternion[2], rot_quaternion[3], rot_quaternion[0]]
+            )
+            grad_check_data['lastGradVals'] = rot_obj.apply(np.asarray(grad_check_data['lastGradVals'], dtype=float), inverse=True)
+
+        for i in range(3):
+            grad_to_check = check_g[i]
+            if grad_to_check is None:
+                if abs(grad_check_data['lastGradVals'][i]) > slew_eps:
+                    raise RuntimeError(
+                        f'Error in block {block_index} on gradient axis {i + 1}: previous block ended with non-zero amplitude but the current block has no compatible gradient.'
+                    )
+                grad_check_data['lastGradVals'][i] = 0
+                continue
+
+            if abs(grad_to_check.start[1]) > slew_eps:
+                if grad_to_check.start[0] != 0:
+                    raise RuntimeError('No delay allowed for gradients which start with a non-zero amplitude')
+                if block_index > 1:
+                    if abs(grad_check_data['lastGradVals'][i] - grad_to_check.start[1]) > slew_eps:
+                        raise RuntimeError(
+                            'Two consecutive gradients need to have the same amplitude at the connection point'
+                        )
+                else:
+                    raise RuntimeError('First gradient in the the first block has to start at 0.')
+
+            if abs(grad_to_check.stop[1]) > slew_eps and abs(grad_to_check.stop[0] - duration) > 1e-7:
+                raise RuntimeError("A gradient that doesn't end at zero needs to be aligned to the block boundary.")
+
             if next_block_index is not None:
                 next_id = self.block_events[next_block_index][grad_to_check.idx]
                 if next_id != 0:
@@ -273,28 +404,33 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
                     if next_type == 't':
                         first = 0
                     elif next_type == 'g':
-                        first = next_lib['data'][1]  # v150: changed from ['data'][4] to ['data'][1]
+                        first = next_lib['data'][1]
+                    else:
+                        first = 0
                 else:
                     first = 0
 
-                # Check whether the difference between the first gradient value
-                # in the next block and the last value of the new gradient is
-                # achievable with the specified slew rate.
-                if abs(first - grad_to_check.stop[1]) > self.system.max_slew * self.system.grad_raster_time:
+                if abs(first - grad_to_check.stop[1]) > slew_eps:
                     raise RuntimeError(
                         'Two consecutive gradients need to have the same amplitude at the connection point'
                     )
-        elif abs(grad_to_check.start[1]) > self.system.max_slew * self.system.grad_raster_time:
-            raise RuntimeError('First gradient in the the first block has to start at 0.')
 
-        if (
-            abs(grad_to_check.stop[1]) > self.system.max_slew * self.system.grad_raster_time
-            and abs(grad_to_check.stop[0] - duration) > 1e-7
-        ):
-            raise RuntimeError("A gradient that doesn't end at zero needs to be aligned to the block boundary.")
+            grad_check_data['lastGradVals'][i] = grad_to_check.stop[1]
+
+        if rot_quaternion is not None:
+            grad_check_data['lastGradVals'] = rot_obj.apply(np.asarray(grad_check_data['lastGradVals'], dtype=float))
+
+    self.grad_check_data['validForBlockNum'] = block_index
     # =========
     # END GRADIENT CHECKS
     # =========
+
+    if required_duration is not None:
+        if duration - required_duration > eps:
+            raise ValueError(
+                f'Required block duration is {required_duration:g} s but actual block duration is {duration:g} s'
+            )
+        duration = required_duration
 
     self.block_events[block_index] = new_block
     self.block_durations[block_index] = float(duration)
@@ -316,17 +452,19 @@ def get_raw_block_content_IDs(self, block_index: int) -> SimpleNamespace:
     block : SimpleNamespace
         PyPulseq block content IDs at 'block_index' position in `self.block_events`.
     """
-    raw_block = SimpleNamespace(block_duration=0, rf=0, gx=0, gy=0, gz=0, adc=0, ext=[])
+    raw_block = SimpleNamespace(block_duration=0, rf=0, gx=0, gy=0, gz=0, adc=0, ext=np.zeros((2, 0), dtype=int))
     event_ind = self.block_events[block_index]
 
     # Extensions
     if event_ind[6] > 0:
         next_ext_id = event_ind[6]
+        ext_items = []
         while next_ext_id != 0:
             ext_data = self.extensions_library.data[next_ext_id]
-            raw_block.ext.append(ext_data[:2])
+            ext_items.append(np.asarray(ext_data[:2], dtype=int))
             next_ext_id = ext_data[2]
-        raw_block.ext = np.stack(raw_block.ext, axis=-1)
+        if ext_items:
+            raw_block.ext = np.stack(ext_items, axis=-1)
 
     # RF
     if event_ind[1] > 0:
@@ -342,10 +480,11 @@ def get_raw_block_content_IDs(self, block_index: int) -> SimpleNamespace:
     if event_ind[5] > 0:
         raw_block.adc = event_ind[5]
 
+    raw_block.block_duration = self.block_durations[block_index]
     return raw_block
 
 
-def get_block(self, block_index: int) -> SimpleNamespace:
+def get_block(self, block_index: int, add_ids: bool = False) -> SimpleNamespace:
     """
     Returns PyPulseq block at `block_index` position in `self.block_events`.
 
@@ -368,37 +507,48 @@ def get_block(self, block_index: int) -> SimpleNamespace:
         If a label object of an unknown extension ID is encountered.
     """
     # Check if block exists in the block cache. If so, return that
-    if self.use_block_cache and block_index in self.block_cache:
+    if self.use_block_cache and not add_ids and block_index in self.block_cache:
         return self.block_cache[block_index]
 
-    block = SimpleNamespace()
-    attrs = ['block_duration', 'rf', 'gx', 'gy', 'gz', 'adc', 'label', 'soft_delay']
-    values = [None] * len(attrs)
-    for att, val in zip(attrs, values, strict=False):
-        setattr(block, att, val)
+    raw_block = get_raw_block_content_IDs(self, block_index)
+    block = SimpleNamespace(
+        block_duration=0.0,
+        rf=None,
+        gx=None,
+        gy=None,
+        gz=None,
+        adc=None,
+        delay=None,
+        label=None,
+        soft_delay=None,
+    )
     event_ind = self.block_events[block_index]
 
     if event_ind[0] > 0:  # Delay
         delay = SimpleNamespace()
         delay.type = 'delay'
         delay.delay = self.delay_library.data[event_ind[0]][0]
+        if add_ids:
+            delay.id = int(event_ind[0])
         block.delay = delay
 
-    if event_ind[1] > 0:  # RF
-        if event_ind[1] in self.rf_library.type:
-            block.rf = self.rf_from_lib_data(self.rf_library.data[event_ind[1]], self.rf_library.type[event_ind[1]])
+    if raw_block.rf:  # RF
+        if raw_block.rf in self.rf_library.type:
+            block.rf = self.rf_from_lib_data(self.rf_library.data[raw_block.rf], self.rf_library.type[raw_block.rf])
         else:
-            block.rf = self.rf_from_lib_data(self.rf_library.data[event_ind[1]], 'u')  # Undefined type/use
-
-        # TODO: add optional rf ID from raw_block
+            block.rf = self.rf_from_lib_data(self.rf_library.data[raw_block.rf], 'u')
+        if add_ids:
+            block.rf.id = int(raw_block.rf)
+            block.rf.shape_ids = np.array(self.rf_library.data[raw_block.rf][1:4], dtype=int)
 
     # Gradients
     grad_channels = ['gx', 'gy', 'gz']
     for i in range(len(grad_channels)):
-        if event_ind[2 + i] > 0:
+        grad_id = getattr(raw_block, grad_channels[i])
+        if grad_id:
             grad, compressed = SimpleNamespace(), SimpleNamespace()
-            grad_type = self.grad_library.type[event_ind[2 + i]]
-            lib_data = self.grad_library.data[event_ind[2 + i]]
+            grad_type = self.grad_library.type[grad_id]
+            lib_data = self.grad_library.data[grad_id]
             grad.type = 'trap' if grad_type == 't' else 'grad'
             grad.channel = grad_channels[i][1]
             if grad.type == 'grad':
@@ -425,7 +575,7 @@ def get_block(self, block_index: int) -> SimpleNamespace:
                         )
                     if len(grad.waveform) % 2 != 1:
                         raise ValueError('Oversampled gradient waveforms must have odd number of samples')
-                    t_end = (len(g) + 1) * self.grad_raster_time
+                    t_end = (len(g) + 1) * 0.5 * self.grad_raster_time
                     grad.area = sum(grad.waveform[::2]) * self.grad_raster_time  # remove oversampling
                 else:
                     t_shape_data = self.shape_library.data[time_id]
@@ -445,6 +595,9 @@ def get_block(self, block_index: int) -> SimpleNamespace:
                 grad.shape_dur = t_end
                 grad.first = lib_data[1]  # change in v150 - we always have first/last now
                 grad.last = lib_data[2]  # change in v150 - we always have first/last now
+                if add_ids:
+                    grad.id = int(grad_id)
+                    grad.shape_ids = np.array([shape_id, time_id], dtype=int)
             else:
                 grad.amplitude = lib_data[0]
                 grad.rise_time = lib_data[1]
@@ -453,14 +606,14 @@ def get_block(self, block_index: int) -> SimpleNamespace:
                 grad.delay = lib_data[4]
                 grad.area = grad.amplitude * (grad.flat_time + grad.rise_time / 2 + grad.fall_time / 2)
                 grad.flat_area = grad.amplitude * grad.flat_time
-
-            # TODO: add optional grad ID from raw_block
+                if add_ids:
+                    grad.id = int(grad_id)
 
             setattr(block, grad_channels[i], grad)
 
     # ADC
-    if event_ind[5] > 0:
-        lib_data = self.adc_library.data[event_ind[5]]
+    if raw_block.adc:
+        lib_data = self.adc_library.data[raw_block.adc]
         shape_id_phase_modulation = lib_data[7]
         if shape_id_phase_modulation:
             shape_data = self.shape_library.data[shape_id_phase_modulation]
@@ -483,23 +636,26 @@ def get_block(self, block_index: int) -> SimpleNamespace:
         adc.dead_time = self.system.adc_dead_time
         adc.num_samples = int(adc.num_samples)
         adc.type = 'adc'
-
-        # TODO: add optional adc ID from raw_block
+        if add_ids:
+            adc.id = int(raw_block.adc)
 
         block.adc = adc
 
-    if event_ind[6] > 0:
+    if raw_block.ext.size != 0:
         # We have extensions - triggers, labels, etc.
-        next_ext_id = event_ind[6]
-        while next_ext_id != 0:
-            ext_data = self.extensions_library.data[next_ext_id]
+        trig_list = []
+        label_list = []
+        n_soft_delay = 0
+        n_rotation = 0
+        n_rf_shim = 0
+        for ext_type_id, ext_ref_id in raw_block.ext.T:
             # Format: ext_type, ext_id, next_ext_id
-            ext_type = self.get_extension_type_string(ext_data[0])
+            ext_type = self.get_extension_type_string(int(ext_type_id))
 
             # Triggers
             if ext_type == 'TRIGGERS':
                 trigger_types = ['output', 'trigger']
-                data = self.trigger_library.data[ext_data[1]]
+                data = self.trigger_library.data[int(ext_ref_id)]
                 trigger = SimpleNamespace()
                 trigger.type = trigger_types[int(data[0]) - 1]
                 if data[0] == 1:
@@ -513,53 +669,94 @@ def get_block(self, block_index: int) -> SimpleNamespace:
 
                 trigger.delay = data[2]
                 trigger.duration = data[3]
+                if add_ids:
+                    trigger.id = int(ext_ref_id)
                 # Allow for multiple triggers per block
-                if hasattr(block, 'trigger'):
-                    block.trigger[len(block.trigger)] = trigger
-                else:
-                    block.trigger = {0: trigger}
+                trig_list.append(trigger)
             elif ext_type in ['LABELSET', 'LABELINC']:
                 label = SimpleNamespace()
                 label.type = ext_type.lower()
                 supported_labels = get_supported_labels()
                 if ext_type == 'LABELSET':
-                    data = self.label_set_library.data[ext_data[1]]
+                    data = self.label_set_library.data[int(ext_ref_id)]
                 else:
-                    data = self.label_inc_library.data[ext_data[1]]
+                    data = self.label_inc_library.data[int(ext_ref_id)]
 
                 label.label = supported_labels[int(data[1] - 1)]
                 label.value = data[0]
+                if add_ids:
+                    label.id = int(ext_ref_id)
                 # Allow for multiple labels per block
-                if block.label is not None:
-                    block.label[len(block.label)] = label
-                else:
-                    block.label = {0: label}
+                label_list.append(label)
             elif ext_type == 'DELAYS':
-                data = self.soft_delay_library.data[ext_data[1]]
+                n_soft_delay += 1
+                if n_soft_delay > 1:
+                    raise RuntimeError('Only one soft delay extension object per block is allowed')
+                data = self.soft_delay_library.data[int(ext_ref_id)]
+                hint_id = int(float(data[3]))
+                hint = self.soft_delay_hints2[hint_id - 1] if hint_id > 0 else ''
 
-                # TODO: Check for multiple soft delays
-                block.soft_delay = SimpleNamespace(
+                soft_delay = SimpleNamespace(
                     type='soft_delay',
-                    numID=data[0],
+                    numID=int(float(data[0])),
                     offset=data[1],
                     factor=data[2],
-                    hint=data[3],
+                    hint=hint,
                     default_duration=self.block_durations[block_index],
                 )
+                if add_ids:
+                    soft_delay.id = int(ext_ref_id)
+                block.soft_delay = soft_delay
+
+            elif ext_type == 'ROTATIONS':
+                n_rotation += 1
+                if n_rotation > 1:
+                    raise RuntimeError('Only one rotation extension object per block is allowed')
+                data = self.rotation_library.data[int(ext_ref_id)]
+                rotation = SimpleNamespace(
+                    type='rot3D',
+                    rot_quaternion=data
+                )
+                if add_ids:
+                    rotation.id = int(ext_ref_id)
+                block.rotation = rotation
+
+            elif ext_type == 'RF_SHIMS':
+                n_rf_shim += 1
+                if n_rf_shim > 1:
+                    raise RuntimeError('Only one RF shim extension object per block is allowed')
+                data = self.rf_shim_library.data[int(ext_ref_id)]
+                # data is [mag0, ph0, mag1, ph1 ...]
+                # shim_vector = data[0::2] * np.exp(1j * data[1::2])
+                # Ensure data is numpy array for slicing
+                if not isinstance(data, np.ndarray):
+                    data = np.array(data)
+                
+                # Careful with shapes if data is not flat?
+                # It should be flat.
+                shim_vector = data[0::2] * np.exp(1j * 2 * np.pi * data[1::2])
+                
+                rf_shim = SimpleNamespace(
+                    type='rf_shim',
+                    shim_vector=shim_vector
+                )
+                if add_ids:
+                    rf_shim.id = int(ext_ref_id)
+                block.rf_shim = rf_shim
 
             else:
-                raise RuntimeError(f'Unknown extension ID {ext_data[0]}')
+                warn(f'unknown extension ID {int(ext_type_id)}', stacklevel=2)
 
-            next_ext_id = ext_data[2]
+        if trig_list:
+            block.trig = list(reversed(trig_list))
 
-    # Reverse the order of labels, because extensions are saved as a reversed linked list
-    if block.label is not None:
-        block.label = dict(enumerate(reversed(block.label.values())))
+        if label_list:
+            block.label = list(reversed(label_list))
 
     block.block_duration = self.block_durations[block_index]
 
     # Enter block into the block cache
-    if self.use_block_cache:
+    if self.use_block_cache and not add_ids:
         self.block_cache[block_index] = block
 
     return block
@@ -603,7 +800,6 @@ def register_adc_event(self, event: EventLibrary) -> Tuple[int, int]:
         event.freq_offset,
         event.phase_offset,
         shape_id,
-        event.dead_time,
     )
 
     # Insert or find/insert into libraryAdd commentMore actions
@@ -696,8 +892,6 @@ def register_grad_event(self, event: SimpleNamespace) -> Union[int, Tuple[int, L
 
             # Shape for timing
             c_time = compress_shape(event.tt / self.grad_raster_time)
-            t_data = np.concatenate(([c_time.num_samples], c_time.data))
-
             if len(c_time.data) == 4 and np.allclose(c_time.data, [0.5, 1, 1, c_time.num_samples - 3]):
                 # Standard raster → leave shape_IDs[1] as 0
                 pass
@@ -705,6 +899,7 @@ def register_grad_event(self, event: SimpleNamespace) -> Union[int, Tuple[int, L
                 # Half-raster → set to -1 as special flag
                 shape_IDs[1] = -1
             else:
+                t_data = np.concatenate(([c_time.num_samples], c_time.data))
                 shape_IDs[1], found = self.shape_library.find_or_insert(t_data)
                 may_exist = may_exist and found
                 any_changed = any_changed or found
@@ -758,11 +953,15 @@ def register_label_event(self, event: SimpleNamespace) -> int:
     label_id = get_supported_labels().index(event.label) + 1
     data = (event.value, label_id)
     if event.type == 'labelset':
-        label_id, found = self.label_set_library.find_or_insert(new_data=data)
+        lib = self.label_set_library
+        ext_type = self.get_extension_type_ID('LABELSET')
     elif event.type == 'labelinc':
-        label_id, found = self.label_inc_library.find_or_insert(new_data=data)
+        lib = self.label_inc_library
+        ext_type = self.get_extension_type_ID('LABELINC')
     else:
         raise ValueError('Unsupported label type passed to register_label_event()')
+
+    label_id, found = lib.find_or_insert(new_data=data)
 
     # Clear block cache because label event was overwritten
     # TODO: Could find only the blocks that are affected by the changes
@@ -784,33 +983,35 @@ def register_soft_delay_event(self, event: SimpleNamespace) -> int:
     int
         ID of registered soft delay event.
     """
-    # Auto-assign numID based on hint - each unique hint gets a unique numID
-    if event.hint in self.soft_delay_hints:
-        # Reuse existing numID for this hint
-        assigned_numID = self.soft_delay_hints[event.hint]
-        if event.numID is not None and event.numID != assigned_numID:
-            raise ValueError(
-                f"Soft delay hint '{event.hint}' is already assigned to numID {assigned_numID}. "
-                f'Cannot use numID {event.numID}. Consider using a different hint or omitting numID.'
-            )
-        event.numID = assigned_numID
-    else:
-        # Assign new numID for this hint
-        if event.numID is None:
-            # Auto-assign next available numID
-            event.numID = max([-1, *self.soft_delay_hints.values()]) + 1
+    num_id = getattr(event, 'numID', None)
+    if num_id is None:
+        if event.hint in self.soft_delay_hints:
+            num_id = self.soft_delay_hints[event.hint]
         else:
-            # Check if user-provided numID is already taken
-            if event.numID in self.soft_delay_hints.values():
-                existing_hint = next(hint for hint, num_id in self.soft_delay_hints.items() if num_id == event.numID)
-                raise ValueError(
-                    f"numID {event.numID} is already used by soft delay '{existing_hint}'. "
-                    f'Use a different numID or omit it for auto-assignment.'
-                )
+            num_id = max([-1, *self.soft_delay_hints.values()]) + 1
+            self.soft_delay_hints[event.hint] = num_id
+    else:
+        num_id = int(num_id)
+        if event.hint in self.soft_delay_hints and self.soft_delay_hints[event.hint] != num_id:
+            raise ValueError(
+                f"Soft delay hint '{event.hint}' is already assigned to numID {self.soft_delay_hints[event.hint]}"
+            )
+        for known_hint, known_num_id in self.soft_delay_hints.items():
+            if known_hint != event.hint and known_num_id == num_id:
+                raise ValueError(f"numID {num_id} is already used by soft delay '{known_hint}'")
+        self.soft_delay_hints[event.hint] = num_id
 
-        self.soft_delay_hints[event.hint] = event.numID
+    event.numID = int(num_id)
 
-    data = (event.numID, event.offset, event.factor, event.hint)
+    # Map hint string to hintID (1-based), matching MATLAB behavior
+    if event.hint in self.soft_delay_hint_ids:
+        hint_id = self.soft_delay_hint_ids[event.hint]
+    else:
+        hint_id = len(self.soft_delay_hints2) + 1
+        self.soft_delay_hint_ids[event.hint] = hint_id
+        self.soft_delay_hints2.append(event.hint)
+
+    data = (event.numID, event.offset, event.factor, hint_id)
     soft_delay_id, found = self.soft_delay_library.find_or_insert(new_data=data)
     if self.use_block_cache and found:
         self.block_cache.clear()
@@ -873,9 +1074,17 @@ def register_rf_event(self, event: SimpleNamespace) -> Tuple[int, List[int]]:
             'inversion',
             'saturation',
             'preparation',
+            'other',
         ]:
             use = event.use[0]
         else:
+            if event.use == 'u':
+                event.use = 'undefined'
+            warn(
+                f"Unknown or undefined RF pulse intended use 'use'={event.use}. Keep in mind that the 'use' "
+                'parameter is not optional since v1.5.0',
+                stacklevel=2,
+            )
             use = 'u'
     else:
         raise ValueError('Parameter "use" is not optional since v1.5.0')
@@ -905,3 +1114,46 @@ def register_rf_event(self, event: SimpleNamespace) -> Tuple[int, List[int]]:
         self.rf_id_to_name_map[rf_id] = event.name
 
     return rf_id, shape_IDs
+
+
+def _retrieve_grad_event(self, grad_id: int, channel: str) -> SimpleNamespace:
+    grad, compressed = SimpleNamespace(), SimpleNamespace()
+    grad_type = self.grad_library.type[grad_id]
+    lib_data = self.grad_library.data[grad_id]
+    grad.type = 'trap' if grad_type == 't' else 'grad'
+    grad.channel = channel
+    
+    if grad.type == 'grad':
+        amplitude = lib_data[0]
+        shape_id = lib_data[3]
+        time_id = lib_data[4]
+        delay = lib_data[5]
+        shape_data = self.shape_library.data[shape_id]
+        compressed.num_samples = shape_data[0]
+        compressed.data = shape_data[1:]
+        g = decompress_shape(compressed)
+        grad.waveform = amplitude * g
+
+        if time_id == 0:
+            grad.tt = (np.arange(1, len(g) + 1) - 0.5) * self.grad_raster_time
+        elif time_id == -1:
+            grad.tt = 0.5 * (np.arange(1, len(g) + 1)) * self.grad_raster_time
+        else:
+            t_shape_data = self.shape_library.data[time_id]
+            compressed.num_samples = t_shape_data[0]
+            compressed.data = t_shape_data[1:]
+            grad.tt = decompress_shape(compressed) * self.grad_raster_time
+            
+        grad.first = lib_data[1]
+        grad.last = lib_data[2]
+        grad.delay = delay
+    else:
+        grad.amplitude = lib_data[0]
+        grad.rise_time = lib_data[1]
+        grad.flat_time = lib_data[2]
+        grad.fall_time = lib_data[3]
+        grad.delay = lib_data[4]
+        grad.area = grad.amplitude * (grad.flat_time + grad.rise_time / 2 + grad.fall_time / 2)
+        grad.flat_area = grad.amplitude * grad.flat_time
+
+    return grad

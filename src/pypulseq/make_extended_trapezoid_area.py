@@ -1,13 +1,126 @@
 from types import SimpleNamespace
-from typing import Tuple, Union
+from typing import Callable, Tuple, Union
 
 import numpy as np
 
-from pypulseq import eps
 from pypulseq.make_extended_trapezoid import make_extended_trapezoid
 from pypulseq.opts import Opts
-from pypulseq.utils.cumsum import cumsum
 from pypulseq.utils.tracing import trace, trace_enabled
+
+
+def _to_raster(time_val: float, raster_time: float) -> float:
+    return np.ceil(time_val / raster_time) * raster_time
+
+
+def _calc_ramp_time(g1: float, g2: float, max_slew: float, raster_time: float) -> float:
+    return _to_raster(abs(g1 - g2) / max_slew, raster_time)
+
+
+def _binary_search(fun: Callable[[int], Union[None, Tuple[int, int, int, float]]], low: int, high: int):
+    while low < high - 1:
+        mid = (low + high) // 2
+        if fun(mid) is not None:
+            high = mid
+        else:
+            low = mid
+    return fun(high)
+
+
+def _find_solution(
+    duration: int,
+    area: float,
+    grad_start: float,
+    grad_end: float,
+    max_slew: float,
+    max_grad: float,
+    raster_time: float,
+):
+    sign_area = np.sign(area) if area != 0 else 1.0
+    grad_amp = sign_area * max_grad
+
+    ru_min = abs(grad_amp - grad_start) / max_slew / raster_time
+    rd_min = abs(grad_amp - grad_end) / max_slew / raster_time
+    flat_time = max(duration - ru_min - rd_min, 0.0)
+
+    approx_area = (
+        ru_min * (grad_amp + grad_start) + rd_min * (grad_amp + grad_end) + 2.0 * flat_time * grad_amp
+    )
+    if abs(2.0 * area / raster_time) > abs(approx_area):
+        return None
+
+    ru = (duration * max_slew * raster_time + sign_area * (grad_end - grad_start)) / (2.0 * max_slew * raster_time)
+    if sign_area * grad_start + ru * max_slew * raster_time > max_grad + 1e-5:
+        ru_steps = int(round(abs(grad_start - sign_area * max_grad) / max_slew / raster_time))
+        rd_steps = int(round(abs(grad_end - sign_area * max_grad) / max_slew / raster_time))
+        flat_steps = int(duration - ru_steps - rd_steps)
+        if flat_steps > 0:
+            grad_amp = -(
+                ru_steps * raster_time * grad_start + rd_steps * raster_time * grad_end - 2.0 * area
+            ) / ((ru_steps + 2 * flat_steps + rd_steps) * raster_time)
+            amps = np.array([grad_start, grad_amp, grad_amp, grad_end], dtype=float)
+            t = np.cumsum([0, ru_steps, flat_steps, rd_steps], dtype=float) * raster_time
+            slew = np.diff(amps) / np.diff(t)
+            if np.max(np.abs(slew)) < max_slew + 1e-5 and np.max(np.abs(amps)) < max_grad:
+                return ru_steps, flat_steps, rd_steps, float(grad_amp)
+
+    while abs(2.0 * area / raster_time) < abs(approx_area):
+        grad_amp = grad_amp / 2.0
+        if abs(grad_amp) < abs(max_grad) / 10.0:
+            ru_min = 0.0
+            rd_min = 0.0
+            flat_time = max(duration - ru_min - rd_min, 0.0)
+            break
+        ru_min = abs(grad_amp - grad_start) / max_slew / raster_time
+        rd_min = abs(grad_amp - grad_end) / max_slew / raster_time
+        flat_time = max(duration - ru_min - rd_min, 0.0)
+        approx_area = (
+            ru_min * (grad_amp + grad_start) + rd_min * (grad_amp + grad_end) + 2.0 * flat_time * grad_amp
+        )
+
+    ru_min = int(np.floor(ru_min))
+    rd_min = int(np.floor(rd_min))
+    ru_limit = int(np.ceil(abs(sign_area * max_grad - grad_start) / max_slew / raster_time) + 1)
+    rd_limit = int(np.ceil(abs(sign_area * max_grad - grad_end) / max_slew / raster_time) + 1)
+
+    ru_grid, rd_grid = np.meshgrid(np.arange(ru_min, ru_limit + 1), np.arange(rd_min, rd_limit + 1))
+    ru = ru_grid.ravel()
+    rd = rd_grid.ravel()
+    valid_mask = rd < (duration - ru)
+    ru = ru[valid_mask]
+    rd = rd[valid_mask]
+
+    num = (2.0 * area - duration * (grad_end + grad_start) * raster_time)
+    denom_min = (grad_start - grad_end + sign_area * duration * max_slew * raster_time)
+    denom_max = (-grad_start + grad_end + sign_area * duration * max_slew * raster_time)
+    if denom_min != 0 and denom_max != 0:
+        ru_flat0_min = int(round(num / denom_min / raster_time))
+        ru_flat0_max = int(duration - round(num / denom_max / raster_time))
+        if ru_flat0_max >= ru_flat0_min:
+            ext = np.arange(ru_flat0_min, ru_flat0_max + 1, dtype=int)
+            ru = np.concatenate((ru, ext))
+            rd = np.concatenate((rd, duration - ext))
+
+    flat = duration - ru - rd
+    valid = (flat >= 0) & (ru > 0) & (rd > 0)
+    ru = ru[valid]
+    rd = rd[valid]
+    flat = flat[valid]
+    if ru.size == 0:
+        return None
+
+    grad_amp = -(
+        ru * raster_time * grad_start + rd * raster_time * grad_end - 2.0 * area
+    ) / ((ru + 2 * flat + rd) * raster_time)
+
+    slew1 = np.abs(grad_start - grad_amp) / (ru * raster_time)
+    slew2 = np.abs(grad_end - grad_amp) / (rd * raster_time)
+    valid = (np.abs(grad_amp) <= max_grad + 1e-5) & (slew1 <= max_slew + 1e-5) & (slew2 <= max_slew + 1e-5)
+    if not np.any(valid):
+        return None
+
+    idx = np.where(valid)[0]
+    best = idx[np.argmin(slew1[idx] + slew2[idx])]
+    return int(ru[best]), int(flat[best]), int(rd[best]), float(grad_amp[best])
 
 
 def make_extended_trapezoid_area(
@@ -17,250 +130,61 @@ def make_extended_trapezoid_area(
     grad_end: float,
     convert_to_arbitrary: bool = False,
     system: Union[Opts, None] = None,
-    duration: Union[float, None] = None,
-    max_grad: Union[float, None] = None,
-    max_slew: Union[float, None] = None,
 ) -> Tuple[SimpleNamespace, np.ndarray, np.ndarray]:
-    """
-    Make an extended trapezoid for given area and gradient start and end point.
-    If no duration is given, the shortest possible duration that satisfies the constraints is used.
-    If a duration is given, the function tries to find a solution with the given duration.
-
-    Parameters
-    ----------
-    area : float
-        Area of extended trapezoid in 1/m (= Hz/m * s).
-    channel : str
-        Orientation of extended trapezoidal gradient event. Must be one of 'x', 'y' or 'z'.
-    grad_start : float
-        Starting non-zero gradient value in Hz/m.
-    grad_end : float
-        Ending non-zero gradient value in Hz/m.
-    convert_to_arbitrary : bool, default=False
-        Boolean flag to enable converting the extended trapezoid gradient into an arbitrary gradient.
-    system : Opts, default=None
-        System limits.
-    duration : float, default=None
-        Desired duration of the extended trapezoid in s.
-    max_grad : float, default=None
-        Maximum gradient strength in Hz/m.
-        If None, the maximum gradient strength is set to the system limit.
-    max_slew : float, default=None
-        Maximum slew rate in Hz/m/s.
-        If None, the maximum slew rate is set to the system limit.
-
-    Returns
-    -------
-    grad : SimpleNamespace
-        Extended trapezoid event.
-    times : numpy.ndarray
-        Time points of the extended trapezoid.
-    amplitude : numpy.ndarray
-        Amplitude values of the extended trapezoid.
-
-    Raises
-    ------
-    ValueError
-        If no solution was found that satisfies the constraints and the desired area (and duration, if given).
-        If `duration` is not None and is not a positive number.
-    """
     if system is None:
         system = Opts.default
 
-    if channel not in ['x', 'y', 'z']:
-        raise ValueError(f'Invalid channel. Must be one of `x`, `y` or `z`. Passed: {channel}')
-
-    if max_grad is None:
-        max_grad = system.max_grad
-
-    if max_slew is None:
-        max_slew = system.max_slew
-
-    if duration is not None and duration <= 0:
-        raise ValueError('Duration must be a positive number.')
-
+    max_slew = system.max_slew * 0.99
+    max_grad = system.max_grad * 0.99
     raster_time = system.grad_raster_time
 
-    def _to_raster(time: float) -> float:
-        return np.ceil(time / raster_time) * raster_time
-
-    def _calc_ramp_time(grad_1: float, grad_2: float) -> float:
-        return _to_raster(abs(grad_1 - grad_2) / max_slew)
-
-    def _find_solution(duration: int) -> Union[None, Tuple[int, int, int, float]]:
-        """Find extended trapezoid gradient waveform for given duration.
-
-        The function performs a grid search over all possible ramp-up, ramp-down and flat times
-        for the given duration and returns the solution with the lowest slew rate.
-
-        Parameters
-        ----------
-        duration
-            duration of the gradient in integer multiples of raster_time
-
-        Returns
-        -------
-            Tuple of ramp-up time, flat time, ramp-down time, gradient amplitude or None if no solution was found
-        """
-        # Determine timings to check for possible solutions
-        ramp_up_times = []
-        ramp_down_times = []
-
-        # First, consider solutions that use maximum slew rate:
-        # Analytically calculate calculate the point where:
-        #   grad_start + ramp_up_time * max_slew == grad_end + ramp_down_time * max_slew
-        ramp_up_time = (duration * max_slew * raster_time - grad_start + grad_end) / (2 * max_slew * raster_time)
-        ramp_up_time = round(ramp_up_time)
-
-        # Check if gradient amplitude exceeds max_grad, if so, adjust ramp
-        # times for a trapezoidal gradient with maximum slew rate.
-        if grad_start + ramp_up_time * max_slew * raster_time > max_grad + eps:
-            ramp_up_time = round(_calc_ramp_time(grad_start, max_grad) / raster_time)
-            ramp_down_time = round(_calc_ramp_time(grad_end, max_grad) / raster_time)
-        else:
-            ramp_down_time = duration - ramp_up_time
-
-        # Add possible solution if timing is valid
-        if ramp_up_time > 0 and ramp_down_time > 0 and ramp_up_time + ramp_down_time <= duration:
-            ramp_up_times.append(ramp_up_time)
-            ramp_down_times.append(ramp_down_time)
-
-        # Analytically calculate calculate the point where:
-        #   grad_start - ramp_up_time * max_slew == grad_end - ramp_down_time * max_slew
-        ramp_up_time = (duration * max_slew * raster_time + grad_start - grad_end) / (2 * max_slew * raster_time)
-        ramp_up_time = round(ramp_up_time)
-
-        # Check if gradient amplitude exceeds -max_grad, if so, adjust ramp
-        # times for a trapezoidal gradient with maximum slew rate.
-        if grad_start - ramp_up_time * max_slew * raster_time < -max_grad - eps:
-            ramp_up_time = round(_calc_ramp_time(grad_start, -max_grad) / raster_time)
-            ramp_down_time = round(_calc_ramp_time(grad_end, -max_grad) / raster_time)
-        else:
-            ramp_down_time = duration - ramp_up_time
-
-        # Add possible solution if timing is valid
-        if ramp_up_time > 0 and ramp_down_time > 0 and ramp_up_time + ramp_down_time <= duration:
-            ramp_up_times.append(ramp_up_time)
-            ramp_down_times.append(ramp_down_time)
-
-        # Second, try any solution with flat_time == 0
-        # This appears to be necessary for many cases, but going through all
-        # timings here is probably too conservative still.
-        for ramp_up_time in range(1, duration):
-            ramp_up_times.append(ramp_up_time)
-            ramp_down_times.append(duration - ramp_up_time)
-
-        time_ramp_up = np.array(ramp_up_times)
-        time_ramp_down = np.array(ramp_down_times)
-
-        # Calculate corresponding flat times
-        flat_time = duration - time_ramp_up - time_ramp_down
-
-        # Filter search space for valid timings (flat time >= 0)
-        valid_indices = flat_time >= 0
-        time_ramp_up = time_ramp_up[valid_indices]
-        time_ramp_down = time_ramp_down[valid_indices]
-        flat_time = flat_time[valid_indices]
-
-        # Calculate gradient strength for given timing using analytical solution
-        grad_amp = -(time_ramp_up * raster_time * grad_start + time_ramp_down * raster_time * grad_end - 2 * area) / (
-            (time_ramp_up + 2 * flat_time + time_ramp_down) * raster_time
-        )
-
-        # Calculate slew rates for given timings
-        slew_rate1 = abs(grad_start - grad_amp) / (time_ramp_up * raster_time)
-        slew_rate2 = abs(grad_end - grad_amp) / (time_ramp_down * raster_time)
-
-        # Filter solutions that satisfy max_grad and max_slew constraints
-        valid_indices = (
-            (abs(grad_amp) <= max_grad + eps) & (slew_rate1 <= max_slew + eps) & (slew_rate2 <= max_slew + eps)
-        )
-        solutions = np.flatnonzero(valid_indices)
-
-        # Check if any valid solutions were found
-        if solutions.shape[0] == 0:
-            return None
-
-        # Find solution with lowest slew rate and return it
-        ind = np.argmin(slew_rate1[valid_indices] + slew_rate2[valid_indices])
-        ind = solutions[ind]
-        return (int(time_ramp_up[ind]), int(flat_time[ind]), int(time_ramp_down[ind]), float(grad_amp[ind]))
-
-    if duration is None:  # duration was not given
-        # Perform a linear search
-        # This is necessary because there can exist a dead space where solutions
-        # do not exist for some durations longer than the optimal duration. The
-        # binary search below fails to find the optimum in those cases.
-        # TODO: Check if range is sufficient, try to calculate the dead space.
-        min_duration = max(round(_calc_ramp_time(grad_end, grad_start) / raster_time), 2)
-
-        # Calculate duration needed to ramp down gradient to zero.
-        # From this point onwards, solutions can always be found by extending
-        # the duration and doing a binary search.
-        max_duration = max(
-            round(_calc_ramp_time(0, grad_start) / raster_time),
-            round(_calc_ramp_time(0, grad_end) / raster_time),
-            min_duration,
-        )
-
-        # Linear search
-        solution = None
-        for current_duration in range(min_duration, max_duration + 1):
-            solution = _find_solution(current_duration)
-            if solution is not None:
-                break
-
-        # Perform a binary search for duration > max_duration if no solution was found
-        if solution is None:
-            # First, find the upper limit on duration where a solution exists by
-            # exponentially expanding the duration.
-            while solution is None:
-                max_duration *= 2
-                solution = _find_solution(max_duration)
-
-            def binary_search(fun, lower_limit, upper_limit):
-                if lower_limit == upper_limit - 1:
-                    return fun(upper_limit)
-
-                test_value = (upper_limit + lower_limit) // 2
-
-                if fun(test_value):
-                    return binary_search(fun, lower_limit, test_value)
-                else:
-                    return binary_search(fun, test_value, upper_limit)
-
-            solution = binary_search(_find_solution, max_duration // 2, max_duration)
-
-    else:  # duration was given, so calculate solution for this duration
-        duration_raster = max(round(_to_raster(duration) / raster_time), 2)
-        solution = _find_solution(duration_raster)
-
-        if solution is None:
-            raise ValueError(f'Could not find a solution for area={area} and duration={duration}.')
-
-    # Get timing and gradient amplitude from solution
-    time_ramp_up = solution[0] * raster_time
-    flat_time = solution[1] * raster_time
-    time_ramp_down = solution[2] * raster_time
-    grad_amp = solution[3]
-
-    # Create extended trapezoid
-    if flat_time > 0:
-        times = cumsum(0, time_ramp_up, flat_time, time_ramp_down)
-        amplitudes = np.array([grad_start, grad_amp, grad_amp, grad_end])
-    else:
-        times = cumsum(0, time_ramp_up, time_ramp_down)
-        amplitudes = np.array([grad_start, grad_amp, grad_end])
-
-    grad = make_extended_trapezoid(
-        channel=channel, amplitudes=amplitudes, convert_to_arbitrary=convert_to_arbitrary, system=system, times=times
+    min_duration = max(int(round(_calc_ramp_time(grad_end, grad_start, max_slew, raster_time) / raster_time)), 2)
+    max_duration = max(
+        int(round(_calc_ramp_time(0.0, grad_start, max_slew, raster_time) / raster_time)),
+        int(round(_calc_ramp_time(0.0, grad_end, max_slew, raster_time) / raster_time)),
+        min_duration,
     )
 
-    # Overwrite trace
+    solution = None
+    for duration in range(min_duration, max_duration + 1):
+        solution = _find_solution(duration, area, grad_start, grad_end, max_slew, max_grad, raster_time)
+        if solution is not None:
+            break
+
+    if solution is None:
+        duration = max_duration
+        while solution is None:
+            duration *= 2
+            solution = _find_solution(duration, area, grad_start, grad_end, max_slew, max_grad, raster_time)
+        solution = _binary_search(
+            lambda d: _find_solution(d, area, grad_start, grad_end, max_slew, max_grad, raster_time),
+            duration // 2,
+            duration,
+        )
+
+    ru_steps, flat_steps, rd_steps, grad_amp = solution
+    time_ramp_up = ru_steps * raster_time
+    flat_time = flat_steps * raster_time
+    time_ramp_down = rd_steps * raster_time
+
+    if flat_time > 0:
+        times = np.cumsum([0.0, time_ramp_up, flat_time, time_ramp_down])
+        amplitudes = np.array([grad_start, grad_amp, grad_amp, grad_end], dtype=float)
+    else:
+        times = np.cumsum([0.0, time_ramp_up, time_ramp_down])
+        amplitudes = np.array([grad_start, grad_amp, grad_end], dtype=float)
+
+    grad = make_extended_trapezoid(
+        channel=channel,
+        system=system,
+        times=times,
+        amplitudes=amplitudes,
+        convert_to_arbitrary=convert_to_arbitrary,
+    )
+    if abs(grad.area - area) >= 1e-3:
+        raise ValueError(f'Could not find a solution for area={area:.6f}.')
+
     if trace_enabled():
         grad.trace = trace()
 
-    if not abs(grad.area - area) < eps:
-        raise ValueError(f'Could not find a solution for area={area}.')
-
-    return grad, grad.tt, grad.waveform
+    return grad, times, amplitudes

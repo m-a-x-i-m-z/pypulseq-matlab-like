@@ -1,4 +1,4 @@
-from copy import copy, deepcopy
+from copy import copy
 from types import SimpleNamespace
 from typing import List, Union
 
@@ -8,7 +8,6 @@ from pypulseq import eps
 from pypulseq.calc_duration import calc_duration
 from pypulseq.make_arbitrary_grad import make_arbitrary_grad
 from pypulseq.make_extended_trapezoid import make_extended_trapezoid
-from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.opts import Opts
 from pypulseq.points_to_waveform import points_to_waveform
 from pypulseq.utils.cumsum import cumsum
@@ -31,9 +30,9 @@ def add_gradients(
     system : Opts, default=Opts()
         System limits.
     max_grad : float, default=0
-        Maximum gradient amplitude (Hz/m).
+        Maximum gradient amplitude.
     max_slew : float, default=0
-        Maximum slew rate (Hz/m/s).
+        Maximum slew rate.
 
     Returns
     -------
@@ -48,18 +47,8 @@ def add_gradients(
     if max_slew <= 0:
         max_slew = system.max_slew
 
-    if len(grads) == 0:
-        raise ValueError('No gradients specified')
-    if len(grads) == 1:
-        # Trapezoids only require a shallow copy
-        if grads[0].type == 'trap':
-            grad = copy(grads[0])
-        else:
-            grad = deepcopy(grads[0])
-
-        if trace_enabled():
-            grad.trace = trace()
-        return grad
+    if len(grads) < 2:
+        raise ValueError('Cannot add less than two gradients.')
 
     # First gradient defines channel
     channel = grads[0].channel
@@ -72,15 +61,10 @@ def add_gradients(
         and all(g.fall_time == grads[0].fall_time for g in grads)
         and all(g.delay == grads[0].delay for g in grads)
     ):
-        grad = make_trapezoid(
-            grads[0].channel,
-            amplitude=sum(g.amplitude for g in grads) + eps,
-            rise_time=grads[0].rise_time,
-            flat_time=grads[0].flat_time,
-            fall_time=grads[0].fall_time,
-            delay=grads[0].delay,
-            system=system,
-        )
+        grad = copy(grads[0])
+        grad.amplitude = sum(g.amplitude for g in grads)
+        grad.area = sum(g.area for g in grads)
+        grad.flat_area = sum(g.flat_area for g in grads)
         if trace_enabled():
             grad.trace = trace()
         return grad
@@ -101,10 +85,12 @@ def add_gradients(
             lasts.append(0.0)
         else:
             tt_rast = grads[ii].tt / system.grad_raster_time
-            is_arb.append(np.all(np.abs(tt_rast + 0.5 - np.arange(1, len(tt_rast) + 1))) < eps)
+            is_arb.append(np.all(np.abs(tt_rast + 0.5 - np.arange(1, len(tt_rast) + 1)) < eps))
             is_osa.append(np.all(np.abs(tt_rast - 0.5 * np.arange(1, len(tt_rast) + 1)) < eps))
             firsts.append(grads[ii].first)
             lasts.append(grads[ii].last)
+    
+
 
     # Check if we only have arbitrary grads on irregular time samplings, optionally mixed with trapezoids
     is_etrap = np.logical_and.reduce((np.logical_not(is_trap), np.logical_not(is_arb), np.logical_not(is_osa)))
@@ -184,7 +170,7 @@ def add_gradients(
             if is_arb[ii] or is_osa[ii]:
                 if np.any(is_osa) and is_arb[ii]:  # Porting MATLAB here, maybe a bit ugly
                     # Interpolate missing samples
-                    idx = np.arange(0, len(g.waveform) - 0.5 + eps, 0.5)
+                    idx = np.arange(0, len(g.waveform) - 1 + 0.1 * eps, 0.5)
                     wf = g.waveform
                     interp_waveform = 0.5 * (wf[np.floor(idx).astype(int)] + wf[np.ceil(idx).astype(int)])
                     waveforms[ii] = interp_waveform
@@ -228,7 +214,7 @@ def add_gradients(
             # Stop for numpy.arange is not g.delay - common_delay - system.grad_raster_time like in Matlab
             # so as to include the endpoint
             waveforms[ii] = np.concatenate(
-                (np.zeros(round((g.delay - common_delay) / system.grad_raster_time)), waveforms[ii])
+                (np.zeros(round((g.delay - common_delay) / target_raster)), waveforms[ii])
             )
 
         num_points = len(waveforms[ii])
