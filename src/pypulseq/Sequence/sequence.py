@@ -891,7 +891,7 @@ class Sequence:
                 prev_total_duration_float = float(prev_total_duration)
             except (TypeError, ValueError):
                 prev_total_duration_float = None
-            if prev_total_duration_float is None or prev_total_duration_float != total_duration:
+            if prev_total_duration_float is None or abs(prev_total_duration_float - total_duration) > 1e-9:
                 prev_total_duration_str = (
                     f'{prev_total_duration_float:.9g}' if prev_total_duration_float is not None else str(prev_total_duration)
                 )
@@ -2608,29 +2608,34 @@ class Sequence:
     def write_file(self, filename: str) -> None:
         self.write(filename, create_signature=False)
 
-    def get_binary_codes(self):
-        prefix = (0xFFFFFFFF << 32)
+    @staticmethod
+    def get_binary_codes():
+        def signed_int64(value):
+            value &= (1 << 64) - 1
+            if value >= (1 << 63):
+                value -= 1 << 64
+            return value
+
+        prefix = 0xFFFFFFFF << 32
         return {
-            'fileHeader': [1, ord('p'), ord('u'), ord('l'), ord('s'), ord('e'), ord('q'), 2],
-            'version_major': int(self.version_major),
-            'version_minor': int(self.version_minor),
-            'version_revision': int(self.version_revision),
+            'fileHeader': int.from_bytes(b'\x01pulseq\x02', byteorder='little', signed=True),
             'section': {
-                'definitions': prefix | 1,
-                'blocks': prefix | 2,
-                'rf': prefix | 3,
-                'gradients': prefix | 4,
-                'trapezoids': prefix | 5,
-                'adc': prefix | 6,
-                'delays': prefix | 7,
-                'shapes': prefix | 8,
-                'extensions': prefix | 9,
-                'triggers': prefix | 10,
-                'labelset': prefix | 11,
-                'labelinc': prefix | 12,
-                'softdelays': prefix | 13,
-                'rfshims': prefix | 14,
-                'rotations': prefix | 15,
+                'definitions': signed_int64(prefix | 1),
+                'blocks': signed_int64(prefix | 2),
+                'rf': signed_int64(prefix | 3),
+                'gradients': signed_int64(prefix | 4),
+                'trapezoids': signed_int64(prefix | 5),
+                'adc': signed_int64(prefix | 6),
+                'delays': signed_int64(prefix | 7),
+                'shapes': signed_int64(prefix | 8),
+                'extensions': signed_int64(prefix | 9),
+                'triggers': signed_int64(prefix | 10),
+                'labelset': signed_int64(prefix | 11),
+                'labelinc': signed_int64(prefix | 12),
+                'softdelays': signed_int64(prefix | 13),
+                'rfshims': signed_int64(prefix | 14),
+                'rotations': signed_int64(prefix | 15),
+                'signature': signed_int64(prefix | 0x00FFFFFF),
             },
         }
 

@@ -10,17 +10,17 @@ from pypulseq.event_lib import EventLibrary
 def read_binary(self, filename: str) -> None:
     codes = self.get_binary_codes()
     with open(filename, 'rb') as fid:
-        magic_num = np.frombuffer(fid.read(8), dtype=np.uint8)
-        if not np.array_equal(magic_num, np.asarray(codes['fileHeader'], dtype=np.uint8)):
-            raise ValueError('Not a binary file')
+        magic_num = _read_scalar(fid, np.int64)
+        if magic_num != codes['fileHeader']:
+            raise ValueError('Not a Pulseq binary file')
         version_major = _read_scalar(fid, np.int64)
         version_minor = _read_scalar(fid, np.int64)
         version_revision = _read_scalar(fid, np.int64)
-        if version_major != codes['version_major']:
+        if version_major != int(self.version_major):
             raise ValueError(f'Unsupported version_major {version_major}')
-        if version_minor != codes['version_minor']:
+        if version_minor != int(self.version_minor):
             raise ValueError(f'Unsupported version_minor {version_minor}')
-        if version_revision != codes['version_revision']:
+        if version_revision != int(self.version_revision):
             raise ValueError(f'Unsupported version_revision {version_revision}')
 
         self.version_major = int(version_major)
@@ -47,6 +47,9 @@ def read_binary(self, filename: str) -> None:
         self.rotation_library = EventLibrary(numpy_data=True)
         self.extension_string_idx = []
         self.extension_numeric_idx = []
+        self.signature_type = ''
+        self.signature_file = ''
+        self.signature_value = ''
         self.block_cache.clear()
 
         while True:
@@ -91,6 +94,11 @@ def read_binary(self, filename: str) -> None:
             elif section == codes['section']['rotations']:
                 self.set_extension_string_ID('ROTATIONS', int(_read_scalar(fid, np.int32)))
                 _read_rotations(fid, self.rotation_library)
+            elif section == codes['section']['signature']:
+                sig_type, sig_value = _read_signature(fid)
+                self.signature_type = sig_type
+                self.signature_file = 'bin'
+                self.signature_value = sig_value
             else:
                 raise ValueError(f'Unknown section code: {section:x}')
 
@@ -114,14 +122,11 @@ def _read_definitions(fid):
     defs = {}
     num_defs = int(_read_scalar(fid, np.int64))
     for _ in range(num_defs):
-        key_bytes = bytearray()
-        while True:
-            c = fid.read(1)
-            if c == b'\x00':
-                break
-            key_bytes.extend(c)
-        key = key_bytes.decode('ascii')
-        count = int(np.frombuffer(fid.read(1), dtype=np.int8)[0])
+        key, legacy_format = _read_definition_key(fid)
+        if legacy_format:
+            count = int(np.frombuffer(fid.read(1), dtype=np.int8)[0])
+        else:
+            count = int(_read_scalar(fid, np.int32))
         value_type = fid.read(1).decode('ascii')
         if value_type == 'f':
             values = np.frombuffer(fid.read(8 * count), dtype=np.float64).copy()
@@ -135,6 +140,40 @@ def _read_definitions(fid):
             raise ValueError(f'Unknown definition type: {value_type}')
         defs[key] = values
     return defs
+
+
+def _read_definition_key(fid):
+    pos = fid.tell()
+    raw_len = fid.read(4)
+    if len(raw_len) != 4:
+        raise EOFError('Unexpected end of file while reading definition key length')
+    key_len = int(np.frombuffer(raw_len, dtype=np.int32)[0])
+    if 0 < key_len < 4096:
+        key_bytes = fid.read(key_len)
+        try:
+            return key_bytes.decode('ascii'), False
+        except UnicodeDecodeError:
+            pass
+
+    fid.seek(pos)
+    key_bytes = bytearray()
+    while True:
+        c = fid.read(1)
+        if c == b'':
+            raise EOFError('Unexpected end of file while reading legacy definition key')
+        if c == b'\x00':
+            break
+        key_bytes.extend(c)
+    return key_bytes.decode('ascii'), True
+
+
+def _read_signature(fid):
+    type_len = int(_read_scalar(fid, np.int32))
+    sig_type = fid.read(type_len).decode('ascii')
+    hash_len = int(_read_scalar(fid, np.int32))
+    sig_value = fid.read(hash_len).hex()
+    _read_scalar(fid, np.int64)
+    return sig_type, sig_value
 
 
 def _read_blocks(fid, block_duration_raster):

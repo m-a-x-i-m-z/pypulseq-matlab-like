@@ -211,9 +211,9 @@ def ext_test_report(self) -> str:
             report += f'   {int(counts_unique[i])} k-space position(s) repeated {int(repeats_unique[i])} times\n'
 
         if is_cartesian:
-            report += 'Cartesian encoding trajectory detected\n'
+            report += 'Grid-like/Cartesian encoding trajectory detected\n'
         else:
-            report += 'Non-cartesian/irregular encoding trajectory detected (eg: EPI, spiral, radial, etc.)\n'
+            report += 'Non-cartesian/irregular encoding trajectory detected (eg: spiral, radial, some EPI, etc.)\n'
 
     ga_converted = convert(from_value=ga, from_unit='Hz/m', to_unit='mT/m', gamma=self.system.gamma)
     gs_converted = convert(from_value=gs, from_unit='Hz/m/s', to_unit='T/m/s', gamma=self.system.gamma)

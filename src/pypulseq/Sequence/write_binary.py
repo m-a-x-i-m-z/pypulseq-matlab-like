@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+import hashlib
+from typing import Any, Union
 
 import numpy as np
 
 
-def write_binary(self, filename: str) -> None:
+def write_binary(self, filename: str, create_signature: bool = True) -> Union[str, None]:
     if self.rotation_library.data:
         required = self.get_definition('RequiredExtensions')
         required = '' if required is None else str(required).strip()
@@ -14,24 +15,26 @@ def write_binary(self, filename: str) -> None:
 
     codes = self.get_binary_codes()
     with open(filename, 'wb') as fid:
-        fid.write(bytes(codes['fileHeader']))
-        _write_int64(fid, codes['version_major'])
-        _write_int64(fid, codes['version_minor'])
-        _write_int64(fid, codes['version_revision'])
+        _write_int64(fid, codes['fileHeader'])
+        _write_int64(fid, int(self.version_major))
+        _write_int64(fid, int(self.version_minor))
+        _write_int64(fid, int(self.version_revision))
 
         if self.definitions:
             _write_int64(fid, codes['section']['definitions'])
             _write_int64(fid, len(self.definitions))
             for key, val in self.definitions.items():
-                fid.write(key.encode('ascii') + b'\x00')
+                key_bytes = key.encode('ascii')
+                _write_int32(fid, len(key_bytes))
+                fid.write(key_bytes)
                 if isinstance(val, str):
                     data = val.encode('ascii')
-                    _write_int8(fid, len(data))
+                    _write_int32(fid, len(data))
                     fid.write(b'c')
                     fid.write(data)
                 else:
                     arr = np.asarray(val)
-                    _write_int8(fid, arr.size)
+                    _write_int32(fid, arr.size)
                     if np.issubdtype(arr.dtype, np.integer):
                         fid.write(b'i')
                         fid.write(arr.astype(np.int32).reshape(-1).tobytes())
@@ -180,6 +183,30 @@ def write_binary(self, filename: str) -> None:
             for k, data in self.rotation_library.data.items():
                 _write_int32(fid, k)
                 fid.write(np.asarray(data, dtype=np.float64).reshape(-1).tobytes())
+
+    if create_signature:
+        with open(filename, 'rb') as fid:
+            payload = fid.read()
+        md5_hash = hashlib.md5(payload).hexdigest()
+
+        self.signature_type = 'md5'
+        self.signature_file = 'bin'
+        self.signature_value = md5_hash
+
+        with open(filename, 'ab') as fid:
+            signed_len = fid.tell()
+            _write_int64(fid, codes['section']['signature'])
+            sig_type = self.signature_type.encode('ascii')
+            _write_int32(fid, len(sig_type))
+            fid.write(sig_type)
+            sig_bytes = bytes.fromhex(md5_hash)
+            _write_int32(fid, len(sig_bytes))
+            fid.write(sig_bytes)
+            _write_int64(fid, signed_len)
+
+        return md5_hash
+
+    return None
 
 
 def _write_int8(fid: Any, value: int) -> None:

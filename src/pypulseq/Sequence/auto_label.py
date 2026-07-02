@@ -13,9 +13,10 @@ def _adc_blocks(seq, block_range):
     first, last = int(block_range[0]), int(block_range[1])
     out = []
     for block_id in range(first, last + 1):
-        block = seq.get_block(block_id)
-        if getattr(block, 'adc', None) is not None:
-            out.append((block_id, block))
+        block_event = seq.block_events.get(block_id)
+        if block_event is None or len(block_event) < 6 or int(block_event[5]) == 0:
+            continue
+        out.append((block_id, seq.get_block(block_id)))
     return out
 
 
@@ -38,6 +39,7 @@ def auto_label(
     use_aux=None,
     skip_apply: bool = False,
     plot: bool = False,
+    mirror_fourier: bool = False,
     reflect=None,
     reorder=None,
     no_plots: bool = False,
@@ -50,8 +52,10 @@ def auto_label(
 
     reflect = [] if reflect is None else [int(x) - 1 for x in np.asarray(reflect).reshape(-1)]
     reorder = [] if reorder is None else [int(x) - 1 for x in np.asarray(reorder).reshape(-1)]
-    if use_labels is not None and (reflect or reorder):
-        raise ValueError("'reflect' or 'reorder' only affect detection and cannot be used together with 'use_labels'")
+    if use_labels is not None and (reflect or reorder or mirror_fourier):
+        raise ValueError(
+            "'reflect', 'reorder' or 'mirror_fourier' only affect detection and cannot be used together with 'use_labels'"
+        )
     if len(reflect) != len(set(reflect)):
         raise ValueError("All indices in 'reflect' must be unique")
     if any(axis < 0 or axis > 2 for axis in reflect):
@@ -95,8 +99,13 @@ def auto_label(
                     labels['NOISE'] = noise
 
         ktraj_adc = np.asarray(ktraj_adc, dtype=float)
+        if mirror_fourier:
+            ktraj_adc = -ktraj_adc
         if reflect:
             ktraj_adc[reflect, :] = -ktraj_adc[reflect, :]
+        if reorder:
+            n_reorder = len(reorder)
+            ktraj_adc[:n_reorder, :] = ktraj_adc[reorder, :]
 
         if slicepos is not None and np.asarray(slicepos).size and len(t_adc_starts) != 0:
             slicepos = np.asarray(slicepos, dtype=float)
@@ -149,20 +158,46 @@ def auto_label(
             echo_positions = np.zeros(n_adcs, dtype=int)
             echo_times = np.zeros(n_adcs, dtype=float)
             grad_readout = np.zeros((3, n_adcs), dtype=float)
+
+            center_sample = first_non_noise_sample
+            if ktraj_adc[:, first_non_noise_sample:].size:
+                center_sample += int(np.argmin(np.linalg.norm(ktraj_adc[:, first_non_noise_sample:], axis=0)))
+            center_point = ktraj_adc[:, center_sample] if center_sample < ktraj_adc.shape[1] else np.zeros(3)
+
             for adc_idx, start in enumerate(adc_starts):
                 stop = start + adc_lengths[adc_idx]
                 segment = ktraj_adc[:, start:stop]
                 if segment.size == 0:
                     centers.append(np.zeros(ktraj_adc.shape[0]))
                     continue
-                echo_pos = int(np.argmin(np.linalg.norm(segment, axis=0)))
+                echo_pos = int(np.argmin(np.linalg.norm(segment - center_point[:, None], axis=0)))
                 echo_positions[adc_idx] = echo_pos
-                centers.append(segment[:, echo_pos])
-                echo_time = float(t_adc[start + echo_pos])
+                k_echo = segment[:, echo_pos]
+                centers.append(k_echo)
+                echo_index = start + echo_pos
+                echo_time = float(t_adc[echo_index])
+                if np.linalg.norm(center_point) > np.finfo(float).eps:
+                    indices_to_check = []
+                    if echo_pos > 0:
+                        indices_to_check.append(echo_index - 1)
+                    if echo_index < stop - 1:
+                        indices_to_check.append(echo_index + 1)
+                    for index_to_check in indices_to_check:
+                        v_i_to_0 = -k_echo
+                        v_i_to_t = ktraj_adc[:, index_to_check] - k_echo
+                        denom = np.linalg.norm(v_i_to_t) ** 2
+                        if denom == 0:
+                            continue
+                        p_vit = float(np.matmul(v_i_to_0, v_i_to_t) / denom)
+                        if p_vit > 0:
+                            echo_time = echo_time * (1 - p_vit) + float(t_adc[index_to_check]) * p_vit
+                            break
                 echo_times[adc_idx] = echo_time
                 for axis in range(min(3, len(gw_pp))):
                     if gw_pp[axis] is not None:
                         grad_readout[axis, adc_idx] = gw_pp[axis](echo_time)
+                if mirror_fourier:
+                    grad_readout[:, adc_idx] = -grad_readout[:, adc_idx]
                 if reflect:
                     grad_readout[reflect, adc_idx] = -grad_readout[reflect, adc_idx]
                 if reorder:
@@ -185,9 +220,6 @@ def auto_label(
                 if np.any(rev):
                     labels['REV'] = rev
 
-                center_sample = first_non_noise_sample
-                if ktraj_adc[:, first_non_noise_sample:].size:
-                    center_sample += int(np.argmin(np.linalg.norm(ktraj_adc[:, first_non_noise_sample:], axis=0)))
                 central_adc = int(np.searchsorted(adc_starts, center_sample, side='right') - 1)
                 central_adc = max(0, min(central_adc, n_adcs - 1))
                 aux['kSpaceCenterSample'] = int(echo_positions[central_adc])
@@ -237,6 +269,58 @@ def auto_label(
                         aux['epiWithThreeEchoNavigator'] = True
                         is_navigator = (nav_candidates.astype(int) + np.roll(nav_candidates, 1) + np.roll(nav_candidates, -1)) > 1.5
                         labels['NAV'] = is_navigator.astype(int)
+
+                repeat = np.zeros(n_adcs, dtype=int)
+                valid_adc_indices = [idx for idx in range(first_non_noise_adc, n_adcs) if not is_navigator[idx]]
+                if valid_adc_indices:
+                    active_for_repeat = active if active.size else np.arange(centers.shape[0])
+                    repeat_counts = {}
+                    quant_scale = max(np.max(np.abs(centers[active_for_repeat, valid_adc_indices])), 1.0) / 4e6
+                    for adc_idx in valid_adc_indices:
+                        spatial_key = tuple(np.round(centers[active_for_repeat, adc_idx] / quant_scale).astype(int))
+                        if 'SLC' in labels:
+                            spatial_key = (*spatial_key, int(np.asarray(labels['SLC'])[adc_idx]))
+                        repeat[adc_idx] = repeat_counts.get(spatial_key, 0)
+                        repeat_counts[spatial_key] = repeat[adc_idx] + 1
+
+                    n_rep = int(np.max(repeat)) + 1
+                    if n_rep > 1:
+                        rep_te = np.zeros(n_rep, dtype=float)
+                        skip_eco = False
+                        for rep_idx in range(n_rep):
+                            adc_mask = [idx for idx in valid_adc_indices if repeat[idx] == rep_idx]
+                            if not adc_mask:
+                                skip_eco = True
+                                break
+                            rep_te[rep_idx] = float(np.median(echo_times[adc_mask]))
+                        if not skip_eco:
+                            te_order = np.argsort(rep_te)
+                            te_sorted = rep_te[te_order]
+                            cluster_ids = np.cumsum(np.r_[0, np.diff(te_sorted) > 10e-6])
+                            unique_te = np.array(
+                                [np.mean(te_sorted[cluster_ids == cluster_id]) for cluster_id in range(cluster_ids[-1] + 1)]
+                            )
+                            rep_to_echo = np.zeros(n_rep, dtype=int)
+                            for sorted_idx, rep_idx in enumerate(te_order):
+                                rep_to_echo[rep_idx] = int(cluster_ids[sorted_idx])
+                            aux['TE'] = unique_te
+
+                            echo = np.zeros(n_adcs, dtype=int)
+                            new_repeat = np.zeros(n_adcs, dtype=int)
+                            echo_rep_counts = {}
+                            for rep_idx in range(n_rep):
+                                echo_idx = int(rep_to_echo[rep_idx])
+                                echo_rep_counts.setdefault(echo_idx, 0)
+                                adc_mask = [idx for idx in valid_adc_indices if repeat[idx] == rep_idx]
+                                for adc_idx in adc_mask:
+                                    echo[adc_idx] = echo_idx
+                                    new_repeat[adc_idx] = echo_rep_counts[echo_idx]
+                                echo_rep_counts[echo_idx] += 1
+                            repeat = new_repeat
+                            if np.max(echo) > 0:
+                                labels['ECO'] = echo
+                    if np.max(repeat) > 0:
+                        labels['REP'] = repeat
 
     if use_aux is not None:
         aux = dict(use_aux) if not isinstance(use_aux, SimpleNamespace) else vars(use_aux).copy()
