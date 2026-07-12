@@ -727,14 +727,14 @@ def get_block(self, block_index: int, add_ids: bool = False) -> SimpleNamespace:
                     raise RuntimeError('Only one RF shim extension object per block is allowed')
                 data = self.rf_shim_library.data[int(ext_ref_id)]
                 # data is [mag0, ph0, mag1, ph1 ...]
-                # shim_vector = data[0::2] * np.exp(1j * data[1::2])
+                # data is [magnitude, phase, magnitude, phase, ...]
                 # Ensure data is numpy array for slicing
                 if not isinstance(data, np.ndarray):
                     data = np.array(data)
                 
                 # Careful with shapes if data is not flat?
                 # It should be flat.
-                shim_vector = data[0::2] * np.exp(1j * 2 * np.pi * data[1::2])
+                shim_vector = data[0::2] * np.exp(1j * data[1::2])
                 
                 rf_shim = SimpleNamespace(
                     type='rf_shim',
@@ -871,7 +871,7 @@ def register_grad_event(self, event: SimpleNamespace) -> Union[int, Tuple[int, L
     any_changed = False
 
     if event.type == 'grad':
-        amplitude = np.max(np.abs(event.waveform))
+        amplitude = max((abs(value) for value in event.waveform), default=0.0)
         if amplitude > 0:
             fnz = event.waveform[np.nonzero(event.waveform)[0][0]]
             amplitude *= np.sign(fnz) if fnz != 0 else 1
@@ -893,10 +893,10 @@ def register_grad_event(self, event: SimpleNamespace) -> Union[int, Tuple[int, L
             # Shape for timing
             c_time = compress_shape(event.tt / self.grad_raster_time)
             if len(c_time.data) == 4 and np.allclose(c_time.data, [0.5, 1, 1, c_time.num_samples - 3]):
-                # Standard raster → leave shape_IDs[1] as 0
+                # Standard raster: leave shape_IDs[1] as 0
                 pass
             elif len(c_time.data) == 3 and np.allclose(c_time.data, [0.5, 0.5, c_time.num_samples - 2]):
-                # Half-raster → set to -1 as special flag
+                # Half-raster: set to -1 as special flag
                 shape_IDs[1] = -1
             else:
                 t_data = np.concatenate(([c_time.num_samples], c_time.data))

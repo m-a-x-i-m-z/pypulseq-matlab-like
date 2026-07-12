@@ -32,7 +32,11 @@ def _find_solution(
     max_grad: float,
     raster_time: float,
 ):
-    sign_area = np.sign(area) if area != 0 else 1.0
+    sign_area = np.sign(area)
+    if sign_area == 0:
+        sign_area = -np.sign(grad_start + grad_end)
+        if sign_area == 0:
+            sign_area = 1.0
     grad_amp = sign_area * max_grad
     ramp_up_times = []
     ramp_down_times = []
@@ -133,7 +137,7 @@ def _find_solution(
                 rd_limit = rd_max
             flat_time = duration - rd_max - ru_max
 
-        if flat_time > 0 and abs(grad_p0 - grad_p1) / (flat_time * raster_time) > max_slew:
+        if abs(grad_p0 - grad_p1) / (flat_time * raster_time) > max_slew:
             if abs(grad_p0) < abs(grad_p1):
                 grad_p1 = grad_p0 + flat_time * raster_time * max_slew * sign_area
                 rd_max = np.ceil(abs(grad_end - grad_p1) / max_slew / raster_time)
@@ -168,7 +172,17 @@ def _find_solution(
             slew = np.diff(amps) / np.diff(t)
             if np.max(np.abs(slew)) <= max_slew + 1e-5:
                 return t, amps
-
+            for ru_try in range(int(ru_max - 1), int(duration - rd_max) + 1):
+                for rd_try in range(int(rd_max - 1), int(duration - ru_try) + 1):
+                    flat = duration - ru_try - rd_try
+                    grad_amp = -(
+                        ru_try * raster_time * grad_start + rd_try * raster_time * grad_end - 2 * area
+                    ) / ((ru_try + 2 * flat + rd_try) * raster_time)
+                    amps = np.array([grad_start, grad_amp, grad_amp, grad_end], dtype=float)
+                    t = np.cumsum([0, ru_try, flat, rd_try]) * raster_time
+                    slew = np.diff(amps) / np.diff(t)
+                    if np.max(np.abs(slew)) < max_slew + 1e-5 and np.max(np.abs(amps)) < max_grad:
+                        return t, amps
         if abs(area_current - area) < abs(min_dif_area):
             min_dif_area = area - area_current
 
@@ -205,6 +219,11 @@ def make_hexagon_gradient_area(channel: str, grad_start: float, grad_end: float,
     if system is None:
         system = Opts.default
 
+    if abs(grad_start) > system.max_grad:
+        raise ValueError(f'grad_start amplitude violation ({abs(grad_start) / system.max_grad * 100:.0f}%)')
+    if abs(grad_end) > system.max_grad:
+        raise ValueError(f'grad_end amplitude violation ({abs(grad_end) / system.max_grad * 100:.0f}%)')
+
     max_slew = system.max_slew * 0.99
     max_grad = system.max_grad * 0.99
     raster_time = system.grad_raster_time
@@ -234,9 +253,9 @@ def make_hexagon_gradient_area(channel: str, grad_start: float, grad_end: float,
             duration,
         )
 
-    if np.any(np.diff(times) == 0):
-        times = np.asarray([times[0], times[1], times[3]], dtype=float)
-        amplitudes = np.asarray([amplitudes[0], amplitudes[1], amplitudes[3]], dtype=float)
+    keep = np.concatenate(([True], np.diff(times) > 0))
+    times = times[keep]
+    amplitudes = amplitudes[keep]
 
     grad = make_extended_trapezoid(channel=channel, system=system, times=times, amplitudes=amplitudes)
     if abs(grad.area - area) >= 1e-3:

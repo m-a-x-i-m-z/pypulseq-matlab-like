@@ -16,7 +16,6 @@ def sim_rf(
     """
     Simulate an RF pulse with quaternion rotations.
 
-    MATLAB counterpart: `mr.simRf`.
     """
     bw_mul = 4.0
     df = 1.0
@@ -53,8 +52,9 @@ def sim_rf(
     t = (np.arange(1, int(np.round(rf.shape_dur / dt)) + 1) * dt) - 0.5 * dt
     f = 2 * np.pi * np.linspace(f0 - bw_mul * bw / 2.0, f0 + bw_mul * bw / 2.0, int(max(1, np.round(bw / df))))
 
-    shape = np.interp(t, rf.t, np.real(rf.signal), left=0.0, right=0.0) + 1j * np.interp(
-        t, rf.t, np.imag(rf.signal), left=0.0, right=0.0
+    shape = 2 * np.pi * (
+        np.interp(t, rf.t, np.real(rf.signal), left=0.0, right=0.0)
+        + 1j * np.interp(t, rf.t, np.imag(rf.signal), left=0.0, right=0.0)
     )
     shape *= np.exp(1j * (full_phase_offset + 2 * np.pi * full_freq_offset * t))
 
@@ -69,7 +69,7 @@ def sim_rf(
         abs_w = np.abs(w)
         n = np.column_stack((np.real(shape[j]) * np.ones_like(f), np.imag(shape[j]) * np.ones_like(f), f))
         nz = abs_w > 0
-        n[nz] /= abs_w[nz, None]
+        n[nz] *= dt / abs_w[nz, None]
         q = _quat_multiply(q, np.column_stack((np.cos(w / 2.0), np.sin(w / 2.0)[:, None] * n)))
 
     w = -f * dt * t.size * rephase_factor

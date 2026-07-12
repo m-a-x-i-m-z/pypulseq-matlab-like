@@ -52,11 +52,9 @@ def add_supported_label(new_label: str) -> Tuple[str, ...]:
     return tuple(_SUPPORTED_LABELS)
 
 
-def get_supported_rf_uses() -> Tuple[str, str, str, str, str, str, str]:
-    """
-    Returns
-    -------
-    tuple
-        Supported RF use labels.
-    """
-    return 'excitation', 'refocusing', 'inversion', 'saturation', 'preparation', 'other', 'undefined'
+def get_supported_rf_uses(return_short_names: bool = False):
+    """Return supported RF uses and their abbreviations when requested."""
+    supported_rf_use = ('excitation', 'refocusing', 'inversion', 'saturation', 'preparation', 'other', 'undefined')
+    if return_short_names:
+        return supported_rf_use, ''.join(use[0] for use in supported_rf_use)
+    return supported_rf_use

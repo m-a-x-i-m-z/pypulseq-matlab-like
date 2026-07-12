@@ -27,14 +27,10 @@ def make_slr_pulse(
     dwell: float = 0.0,
     use: str = 'excitation',
     return_gz: bool = False,
+    return_delay: bool = False,
     recenter_on_sample: bool = False,
 ) -> Union[SimpleNamespace, Tuple[SimpleNamespace, SimpleNamespace, SimpleNamespace]]:
-    """
-    MATLAB-parity wrapper for `makeSLRpulse.m`.
-
-    This function exposes a dedicated SLR-pulse constructor in PyPulseq while
-    reusing the existing SigPy-backed implementation in `sigpy_n_seq()`.
-    """
+    """Create an SLR RF pulse using the SigPy-backed implementation."""
     if system is None:
         system = Opts.default
 
@@ -42,7 +38,6 @@ def make_slr_pulse(
     if use != '' and use not in valid_pulse_uses:
         raise ValueError(f'Invalid use parameter. Must be one of {valid_pulse_uses}. Passed: {use}')
 
-    # Match MATLAB ptype selection logic from makeSLRpulse.m
     if use == 'excitation':
         ptype = 'st' if flip_angle <= np.pi / 6 else 'ex'
     elif use == 'refocusing':
@@ -73,6 +68,7 @@ def make_slr_pulse(
         max_slew=max_slew,
         phase_offset=phase_offset,
         return_gz=return_gz,
+        return_delay=return_delay,
         slice_thickness=slice_thickness,
         system=system,
         time_bw_product=time_bw_product,

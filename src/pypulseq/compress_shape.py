@@ -1,6 +1,12 @@
+import math
 from types import SimpleNamespace
 
 import numpy as np
+
+
+def _round_half_away_from_zero(values):
+    values = np.asarray(values)
+    return np.sign(values) * np.floor(np.abs(values) + 0.5)
 
 
 def compress_shape(decompressed_shape: np.ndarray, force_compression: bool = False) -> SimpleNamespace:
@@ -24,7 +30,7 @@ def compress_shape(decompressed_shape: np.ndarray, force_compression: bool = Fal
     compressed_shape : SimpleNamespace
         A `SimpleNamespace` object containing the number of samples and the compressed data.
     """
-    if np.any(~np.isfinite(decompressed_shape)):
+    if any(not math.isfinite(float(value)) for value in decompressed_shape):
         raise ValueError('compress_shape() received infinite samples.')
 
     if not force_compression and len(decompressed_shape) <= 4:  # Avoid compressing very short shapes
@@ -36,9 +42,9 @@ def compress_shape(decompressed_shape: np.ndarray, force_compression: bool = Fal
     # Single precision floating point has ~7.25 decimal places
     quant_factor = 1e-7
     decompressed_shape_scaled = decompressed_shape / quant_factor
-    datq = np.round(np.concatenate((decompressed_shape_scaled[[0]], np.diff(decompressed_shape_scaled))))
+    datq = _round_half_away_from_zero(np.concatenate((decompressed_shape_scaled[[0]], np.diff(decompressed_shape_scaled))))
     qerr = decompressed_shape_scaled - np.cumsum(datq)
-    qcor = np.concatenate(([0], np.diff(np.round(qerr))))
+    qcor = np.concatenate(([0], np.diff(_round_half_away_from_zero(qerr))))
     datd = datq + qcor
 
     # RLE of datd

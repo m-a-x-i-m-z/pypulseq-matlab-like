@@ -82,25 +82,27 @@ def split_gradient(
         )
         ramp_down.delay = total_length - grad.fall_time
 
-        times = np.array([0, grad.flat_time])
-        amplitudes = np.array([grad.amplitude, grad.amplitude])
-
-        flat_top = make_extended_trapezoid(
-            channel=channel,
-            system=system,
-            times=times,
-            amplitudes=amplitudes,
-            skip_check=True,
-        )
-        flat_top.delay = grad.delay + grad.rise_time
+        flat_top = None
+        if grad.flat_time > np.finfo(float).eps:
+            times = np.array([0, grad.flat_time])
+            amplitudes = np.array([grad.amplitude, grad.amplitude])
+            flat_top = make_extended_trapezoid(
+                channel=channel,
+                system=system,
+                times=times,
+                amplitudes=amplitudes,
+                skip_check=True,
+            )
+            flat_top.delay = grad.delay + grad.rise_time
 
         if trace_enabled():
             t = trace()
             ramp_up.trace = t
-            flat_top.trace = t
+            if flat_top is not None:
+                flat_top.trace = t
             ramp_down.trace = t
 
-        return ramp_up, flat_top, ramp_down
+        return tuple(part for part in (ramp_up, flat_top, ramp_down) if part is not None)
     elif grad.type == 'grad':
         raise ValueError('Splitting of arbitrary gradients is not implemented yet.')
     else:

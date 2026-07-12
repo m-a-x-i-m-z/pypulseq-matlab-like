@@ -49,7 +49,7 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
     if remove_duplicates:
         self = self.remove_duplicates()
 
-    with open(file_name, 'w') as output_file:
+    with open(file_name, 'w', encoding='utf-8', newline='\n') as output_file:
         output_file.write('# Pulseq sequence file\n')
         output_file.write('# Created by PyPulseq\n\n')
 
@@ -296,14 +296,12 @@ def write(self, file_name: Union[str, Path], create_signature, remove_duplicates
                 output_file.write('\n')
 
     if create_signature:  # Sign the file
-        # Calculate digest
+        # Calculate the MD5 of the exact unsigned file bytes.
         with open(file_name, 'rb') as output_file:
-            buffer = output_file.read()
+            md5 = hashlib.md5(output_file.read()).hexdigest()
 
-            md5 = hashlib.md5(buffer).hexdigest()
-
-        # Write signature
-        with open(file_name, 'a') as output_file:
+        # No code may modify the sequence file after this signature is written.
+        with open(file_name, 'a', encoding='utf-8', newline='\n') as output_file:
             output_file.write('\n[SIGNATURE]\n')
             output_file.write(
                 '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE]\n'
@@ -362,7 +360,7 @@ def write_v141(self, file_name: Union[str, Path], create_signature, remove_dupli
     if remove_duplicates:
         self = self.remove_duplicates()
 
-    with open(file_name, 'w') as output_file:
+    with open(file_name, 'w', encoding='utf-8', newline='\n') as output_file:
         output_file.write('# Pulseq sequence file\n')
         output_file.write('# Created by PyPulseq\n\n')
 
@@ -559,14 +557,12 @@ def write_v141(self, file_name: Union[str, Path], create_signature, remove_dupli
                 output_file.write('\n')
 
     if create_signature:  # Sign the file
-        # Calculate digest
+        # Calculate the MD5 of the exact unsigned file bytes.
         with open(file_name, 'rb') as output_file:
-            buffer = output_file.read()
+            md5 = hashlib.md5(output_file.read()).hexdigest()
 
-            md5 = hashlib.md5(buffer).hexdigest()
-
-        # Write signature
-        with open(file_name, 'a') as output_file:
+        # No code may modify the sequence file after this signature is written.
+        with open(file_name, 'a', encoding='utf-8', newline='\n') as output_file:
             output_file.write('\n[SIGNATURE]\n')
             output_file.write(
                 '# This is the hash of the Pulseq file, calculated right before the [SIGNATURE]\n'

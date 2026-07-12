@@ -294,7 +294,9 @@ class EventLibrary:
         def round_value(value, digit):
             if not isinstance(value, numbers.Number):
                 return value
-            return round(value, digit - math.ceil(math.log10(abs(value) + 1e-12)) if digit > 0 else -digit)
+            if digit <= 0 or value == 0:
+                return round(value, -digit)
+            return round(value, digit - math.ceil(math.log10(abs(value))))
 
         def round_data(data: Tuple[float], digits: Tuple[int]) -> Tuple[float]:
             """
@@ -326,8 +328,14 @@ class EventLibrary:
                 else:
                     result = result_data
             else:
-                mags = 10 ** (digits - (np.ceil(np.log10(abs(data) + 1e-12))) if digits > 0 else -digits)
-                result = np.round(data * mags) / mags
+                if digits <= 0:
+                    result = np.round(data, -digits)
+                else:
+                    magnitudes = np.zeros_like(data, dtype=float)
+                    nonzero = data != 0
+                    magnitudes[nonzero] = np.ceil(np.log10(np.abs(data[nonzero])))
+                    scales = 10 ** (digits - magnitudes)
+                    result = np.round(data * scales) / scales
             
             result.flags.writeable = False
             return result

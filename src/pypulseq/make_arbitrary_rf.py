@@ -7,6 +7,8 @@ from warnings import warn
 import numpy as np
 
 from pypulseq.calc_rf_center import calc_rf_center
+from pypulseq.calc_duration import calc_duration
+from pypulseq.make_delay import make_delay
 from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.opts import Opts
 from pypulseq.supported_labels_rf_use import get_supported_rf_uses
@@ -25,6 +27,7 @@ def make_arbitrary_rf(
     max_slew: float = 0.0,
     phase_offset: float = 0.0,
     return_gz: bool = False,
+    return_delay: bool = False,
     slice_thickness: float = 0.0,
     system: Union[Opts, None] = None,
     time_bw_product: float = 0.0,
@@ -184,6 +187,14 @@ def make_arbitrary_rf(
         rf.trace = trace()
 
     if return_gz:
+        if return_delay:
+            gzr = make_trapezoid(
+                channel='z',
+                system=system,
+                area=-area * (1 - rf.center / rf.shape_dur) - 0.5 * (gz.area - area),
+            )
+            return rf, gz, gzr, make_delay(calc_duration(rf))
         return rf, gz
-    else:
-        return rf
+    if return_delay:
+        return rf, make_delay(calc_duration(rf))
+    return rf

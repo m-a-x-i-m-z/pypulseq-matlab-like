@@ -185,7 +185,7 @@ def calc_adc_segments(
                     adc_seg_primes.append(i)
                     n //= i
                 i += 2
-            if n > 2:
+            if n > 1:
                 adc_seg_primes.append(n)
         num_segments = 1
         if len(adc_seg_primes) > 1:

@@ -941,11 +941,11 @@ class Sequence:
                 if len(event.t) >= 4:
                     rt = np.asarray(event.t) / self.system.rf_raster_time
                     drt = np.diff(rt)
-                    if np.all(np.abs(drt[1:] - drt[0]) < 1e-9 / self.system.rf_raster_time):
+                    if all(np.abs(drt[1:] - drt[0]) < 1e-9 / self.system.rf_raster_time):
                         dwell = event.t[1] - event.t[0]
                         if not self._div_check(dwell, min(self.system.adc_raster_time, self.system.rf_raster_time)):
                             ok = False
-                    elif np.any(np.abs(rt - np.round(rt)) > 1e-6):
+                    elif any(np.abs(rt - np.round(rt)) > 1e-6):
                         ok = False
             if getattr(event, 'type', None) == 'trap':
                 if not (
@@ -2517,12 +2517,12 @@ class Sequence:
                     else:
                         cur[1, 0] = 0.0
 
-            if assembled[0, -1] < cur[0, 0]:
+            if assembled[0, -1] < cur[0, 0] - 1e-9:
                 assembled = np.hstack((assembled, cur))
             else:
                 if cur[0, 0] < assembled[0, -1] - 1e-9:
                     warn('Warning: looks like rounding errors for some elements exceed the acceptable tolerance!')
-                mask = cur[0, :] > assembled[0, -1]
+                mask = cur[0, :] > assembled[0, -1] + 1e-9
                 if np.any(mask):
                     first_idx = int(np.argmax(mask))
                     assembled = np.hstack((assembled, cur[:, first_idx:]))
@@ -2537,7 +2537,7 @@ class Sequence:
         name: str,
         create_signature: bool = True,
         remove_duplicates: bool = True,
-        check_timing: bool = True,
+        check_timing: bool = False,
         v141_compat: bool = False,
     ) -> Union[str, None]:
         """
@@ -2552,7 +2552,9 @@ class Sequence:
         create_signature : bool, default=True
             Boolean flag to indicate if the file has to be signed.
         remove_duplicates : bool, default=True
-            Remove duplicate events from the sequence before writing
+            Remove duplicate events from the sequence before writing.
+        check_timing : bool, default=False
+            Run the timing check before writing.
         v141_compat: bool, default=False
             Write the sequence in v1.4.1 compatible file format.
         Returns
@@ -2561,14 +2563,11 @@ class Sequence:
         otherwise it returns None. Note that, if remove_duplicates is True, signature belongs to the
         deduplicated sequences signature, and not the Sequence that is stored in the Sequence object.
         """
-        # Check if there are any timing errors in the sequence
+
         if check_timing:
             is_ok, error_report = self.check_timing()
             if not is_ok:
                 warn(f'write(): {len(error_report)} timing errors found in the sequence', stacklevel=2)
-
-        # Calculate sequence duration and stored it in the TotalDuration definition
-        self.set_definition('TotalDuration', sum(self.block_durations.values()))
 
         # Check whether all gradients in the last block are ramped down properly
         last_block_id = next(reversed(self.block_events))

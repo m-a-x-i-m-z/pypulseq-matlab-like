@@ -4,6 +4,8 @@ from warnings import warn
 
 import numpy as np
 
+from pypulseq.calc_duration import calc_duration
+from pypulseq.make_delay import make_delay
 from pypulseq.opts import Opts
 from pypulseq.supported_labels_rf_use import get_supported_rf_uses
 from pypulseq.utils.tracing import trace, trace_enabled
@@ -21,6 +23,7 @@ def make_block_pulse(
     use: str = 'undefined',
     freq_ppm: float = 0.0,
     phase_ppm: float = 0.0,
+    return_delay: bool = False,
 ) -> SimpleNamespace:
     """
     Create a block (RECT or hard) pulse.
@@ -133,4 +136,6 @@ def make_block_pulse(
     if trace_enabled():
         rf.trace = trace()
 
+    if return_delay:
+        return rf, make_delay(calc_duration(rf))
     return rf

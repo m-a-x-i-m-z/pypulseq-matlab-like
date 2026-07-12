@@ -14,9 +14,10 @@ def calc_rf_bandwidth(
     cutoff: float = 0.5,
     return_axis: bool = False,
     return_spectrum: bool = False,
+    return_all: bool = False,
     dw: float = 10,
     dt: Union[float, None] = None,
-) -> Union[float, Tuple[float, np.ndarray], Tuple[float, np.ndarray, np.ndarray]]:
+) -> Union[float, Tuple[float, np.ndarray], Tuple[float, np.ndarray, np.ndarray], Tuple[float, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
     """
     Calculate the spectrum of the RF pulse. Returns the bandwidth of the pulse (calculated by a simple FFT, e.g.
     presuming a low-angle approximation) and optionally the spectrum and the frequency axis. The default for the
@@ -31,6 +32,8 @@ def calc_rf_bandwidth(
         Boolean flag to indicate if frequency axis of RF pulse will be returned.
     return_spectrum : bool, default=False
         Boolean flag to indicate if spectrum of RF pulse will be returned.
+    return_all : bool, default=False
+        Return bandwidth, center frequency, spectrum, frequency axis, resampled RF, and time axis.
     dw : float, default=10
         Spectral resolution in (Hz).
     dt : Union[float, None], default=None
@@ -45,7 +48,7 @@ def calc_rf_bandwidth(
     if dt is None:
         dt = Opts().rf_raster_time
 
-    time_center, _ = calc_rf_center(rf)
+    time_center = rf.center if hasattr(rf, 'center') else calc_rf_center(rf)[0]
 
     if abs(rf.freq_ppm) > np.finfo(float).eps:
         warnings.warn(
@@ -77,6 +80,9 @@ def calc_rf_bandwidth(
     if abs(s_ref) > np.finfo(float).eps:
         spectrum = np.sin(2 * np.pi * dt * s_ref) * spectrum / s_ref
 
+    if return_all:
+        return bw, fc, spectrum, w, rfs, tt
+
     if return_spectrum and not return_axis:
         return bw, spectrum
     elif return_axis and not return_spectrum:
@@ -89,6 +95,11 @@ def calc_rf_bandwidth(
 
 def __find_flank(x, f, c):
     m = np.max(np.abs(f))
-    f = np.abs(f) / m
-    i = np.argwhere(f > c)[0].item()
-    return float(x[i])
+    f = np.abs(f) / m - c
+    i = np.flatnonzero(f > 0)[0]
+    if i > 0:
+        f0 = f[i - 1]
+        f1 = f[i]
+        return float((f1 * x[i - 1] - f0 * x[i]) / (f1 - f0))
+    return float(x[0])
+

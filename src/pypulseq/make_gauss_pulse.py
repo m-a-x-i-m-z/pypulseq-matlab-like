@@ -7,6 +7,8 @@ from warnings import warn
 import numpy as np
 
 from pypulseq.make_trapezoid import make_trapezoid
+from pypulseq.calc_duration import calc_duration
+from pypulseq.make_delay import make_delay
 from pypulseq.opts import Opts
 from pypulseq.supported_labels_rf_use import get_supported_rf_uses
 from pypulseq.utils.tracing import trace, trace_enabled
@@ -25,6 +27,7 @@ def make_gauss_pulse(
     max_slew: float = 0.0,
     phase_offset: float = 0.0,
     return_gz: bool = False,
+    return_delay: bool = False,
     slice_thickness: float = 0.0,
     system: Union[Opts, None] = None,
     time_bw_product: float = 3.0,
@@ -184,9 +187,12 @@ def make_gauss_pulse(
         rf.trace = trace()
 
     if return_gz:
+        if return_delay:
+            return rf, gz, gzr, make_delay(calc_duration(rf))
         return rf, gz, gzr
-    else:
-        return rf
+    if return_delay:
+        return rf, make_delay(calc_duration(rf))
+    return rf
 
 
 def __gauss(x: np.ndarray) -> np.ndarray:

@@ -53,6 +53,9 @@ def add_gradients(
     # First gradient defines channel
     channel = grads[0].channel
 
+    if any(grad.channel != channel for grad in grads[1:]):
+        raise ValueError('Cannot add gradients on different channels.')
+
     # Check if we have a set of traps with the same timing
     if (
         all(g.type == 'trap' for g in grads)

@@ -16,6 +16,8 @@ except ModuleNotFoundError as err:
     ) from err
 
 from pypulseq.calc_rf_center import calc_rf_center
+from pypulseq.calc_duration import calc_duration
+from pypulseq.make_delay import make_delay
 from pypulseq.make_trapezoid import make_trapezoid
 from pypulseq.opts import Opts
 from pypulseq.sigpy_pulse_opts import SigpyPulseOpts
@@ -155,6 +157,7 @@ def sigpy_n_seq(
     max_slew: float = 0.0,
     phase_offset: float = 0.0,
     return_gz: bool = True,
+    return_delay: bool = False,
     slice_thickness: float = 0.0,
     system: Union[Opts, None] = None,
     time_bw_product: float = 4.0,
@@ -345,9 +348,12 @@ def sigpy_n_seq(
         rfp.trace = trace()
 
     if return_gz:
+        if return_delay:
+            return rfp, gz, gzr, make_delay(calc_duration(rfp))
         return rfp, gz, gzr
-    else:
-        return rfp
+    if return_delay:
+        return rfp, make_delay(calc_duration(rfp))
+    return rfp
 
 
 def make_slr(
