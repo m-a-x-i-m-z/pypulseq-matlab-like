@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pypulseq_matlab_like as pp
+import pytest
 
 
 class TestBlock2events:

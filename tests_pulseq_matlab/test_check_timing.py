@@ -1,3 +1,5 @@
+import pytest
+
 import pypulseq_matlab_like as pp
 
 

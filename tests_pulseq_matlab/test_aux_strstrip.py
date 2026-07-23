@@ -1,3 +1,5 @@
+import pytest
+
 class TestAuxStrstrip:
     def test_leading_trailing_spaces(self):
         assert '  hello  '.strip() == 'hello'

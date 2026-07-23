@@ -1,3 +1,5 @@
+import pytest
+
 from pypulseq_matlab_like.supported_labels_rf_use import get_supported_labels
 
 

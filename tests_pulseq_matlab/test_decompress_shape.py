@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from pypulseq_matlab_like.compress_shape import compress_shape
 from pypulseq_matlab_like.decompress_shape import decompress_shape
 

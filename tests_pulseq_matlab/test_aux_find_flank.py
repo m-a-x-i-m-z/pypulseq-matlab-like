@@ -1,3 +1,5 @@
+import pytest
+
 import numpy as np
 
 from pypulseq_matlab_like.calc_rf_bandwidth import __find_flank as find_flank

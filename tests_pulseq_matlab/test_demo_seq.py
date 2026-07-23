@@ -3,14 +3,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
 EXCLUDED_SEQUENCES = {'writeMPRAGE_4ge', 'just_some_nonexistant_sequence_to_test_multiple_excludes'}
 
 
-def test_run_all_demo_seqs():
+def _get_demo_scripts() -> list[Path]:
     repository_root = Path(__file__).resolve().parents[1]
     demo_dir = repository_root / 'examples' / 'demoSeq'
-    demo_scripts = sorted(script for script in demo_dir.glob('*.py') if script.stem not in EXCLUDED_SEQUENCES)
+    return sorted(script for script in demo_dir.glob('*.py') if script.stem not in EXCLUDED_SEQUENCES)
+
+
+@pytest.mark.parametrize('script', _get_demo_scripts(), ids=lambda script: script.name)
+def test_run_demo_seq(script: Path):
+    repository_root = Path(__file__).resolve().parents[1]
 
     environment = os.environ.copy()
     environment.setdefault('MPLBACKEND', 'Agg')
@@ -20,17 +26,13 @@ def test_run_all_demo_seqs():
         path for path in (str(repository_root / 'src'), python_path) if path
     )
 
-    failures = []
-    for script in demo_scripts:
-        result = subprocess.run(
-            [sys.executable, str(script)],
-            cwd=script.parent,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode:
-            failures.append(f'{script.name} (exit {result.returncode}):\n{result.stdout}{result.stderr}')
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=script.parent,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
-    assert not failures, '\n'.join(failures)
+    assert result.returncode == 0, f'{script.name} (exit {result.returncode}):\n{result.stdout}{result.stderr}'

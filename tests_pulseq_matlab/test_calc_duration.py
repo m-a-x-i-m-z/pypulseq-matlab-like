@@ -1,6 +1,7 @@
 from itertools import combinations
 
 import pypulseq_matlab_like as pp
+import pytest
 
 
 def _event_zoo():

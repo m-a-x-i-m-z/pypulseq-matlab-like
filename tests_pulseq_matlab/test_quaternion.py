@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from scipy.spatial.transform import Rotation
 
 from util import assert_equal, quat_wxyz_to_xyzw, quat_xyzw_to_wxyz

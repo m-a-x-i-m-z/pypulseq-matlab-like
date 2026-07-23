@@ -1,3 +1,5 @@
+import pytest
+
 import pypulseq
 from pypulseq_matlab_like.Sequence.sequence import Sequence
 
@@ -12,7 +14,7 @@ class TestAuxVersion:
         major, minor, revision, combined = _version_fields()
         assert major >= 1
         assert minor >= 5
-        assert revision >= 0
+        assert revision >= 1
         assert combined >= 1005001
 
     def test_output_struct(self):

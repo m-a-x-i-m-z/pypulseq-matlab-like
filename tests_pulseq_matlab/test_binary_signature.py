@@ -3,6 +3,7 @@ import tempfile
 
 import numpy as np
 import pypulseq_matlab_like as pp
+import pytest
 
 
 def _test_sequences():
