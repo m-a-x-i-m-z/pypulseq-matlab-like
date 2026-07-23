@@ -1,6 +1,6 @@
 <p align="center">
 
-![PyPulseq](logo.png)
+![PyPulseq](logo_transparent.png)
 
 </p>
 
@@ -18,13 +18,13 @@ This project was created to bridge the gap between the *original* Pulseq impleme
 
 ## Table of contents
 
-1. [📃 General Information][section-general-info]
-2. [🔨 Installation][section-installation]
-3. [⚡ Lightning-start - PyPulseq in your browser!][section-lightning-start]
-4. [🏃‍♂ Quickstart - example scripts][section-quickstart-examples]
-5. [🤿 Deep dive - custom pulse sequences][section-deep-dive]
-6. [👥 Contributing and Community guidelines][section-contributing]
-7. [📖 References][section-references]
+1. [General Information][section-general-info]
+2. [Installation][section-installation]
+3. [Lightning-start - PyPulseq in your browser!][section-lightning-start]
+4. [Quickstart - example scripts][section-quickstart-examples]
+5. [Deep dive - custom pulse sequences][section-deep-dive]
+6. [Contributing and Community guidelines][section-contributing]
+7. [References][section-references]
 
 ---
 
