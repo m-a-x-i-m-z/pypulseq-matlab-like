@@ -208,7 +208,7 @@ def test_applyToSeq_blockRange():
 
 
 def _waveform_areas(seq):
-    return np.array([np.trapezoid(w[1], w[0]) if w.size else 0.0 for w in seq.waveforms_and_times()[0]])
+    return np.array([np.trapz(w[1], w[0]) if w.size else 0.0 for w in seq.waveforms_and_times()[0]])
 
 
 def test_kspace_rotation_analytic():

@@ -1,4 +1,5 @@
 import math
+import os
 from pathlib import Path
 
 import matplotlib
@@ -56,12 +57,21 @@ def _assert_kspace_close(first, second, atol):
 
 
 class TestRotationExtension:
+
+    # This "test" rewrites the expected .seq output files when SAVE_EXPECTED is
+    # set in the environment variables.
+    # E.g. in a unix-based system, run: SAVE_EXPECTED=1 pytest test_sequence.py
+    @pytest.mark.skipif(not os.environ.get('SAVE_EXPECTED'), reason='Only save sequence file when requested')
+    def test_save_expected(self):
+        expected_path = Path(__file__).resolve().parent / 'expected_output' / 'seq_make_radial.seq'
+        seq_make_radial().write(str(expected_path))
+
     def test_vs_rotate(self):
         first, second = seq_make_radial(), seq_make_radial_norotext()
         _assert_waveforms_close(first, second, 1e-5, 1e-5)
         _assert_kspace_close(first, second, 1e-1)
 
-    def test_sequence_save_expected(self, tmp_path):
+    def test_compare_to_expected(self, tmp_path):
         actual_path = tmp_path / 'seq_make_radial.seq'
         seq_make_radial().write(str(actual_path))
         expected_path = Path(__file__).resolve().parent / 'expected_output' / 'seq_make_radial.seq'

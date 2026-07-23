@@ -1,4 +1,5 @@
 import math
+import os
 from pathlib import Path
 
 import matplotlib
@@ -114,8 +115,20 @@ def test_sequence(name, factory):
     assert factory() is not None
 
 
+# This "test" rewrites the expected .seq output files when SAVE_EXPECTED is
+# set in the environment variables.
+# E.g. in a unix-based system, run: SAVE_EXPECTED=1 pytest test_sequence.py
+@pytest.mark.skipif(not os.environ.get('SAVE_EXPECTED'), reason='Only save sequence files when requested')
 @pytest.mark.parametrize('name,factory', SEQUENCE_ZOO.items())
 def test_save_expected(name, factory, tmp_path):
+    #def test_save_expected(self, seq_func):
+    #seq_name = str(seq_func.__name__)
+    #TestSequence.seq.write(expected_output_path / (seq_name + '.seq'))
+    expected_path = Path(__file__).resolve().parent / 'expected_output' / f'{name}.seq'
+    factory().write(str(expected_path))
+
+@pytest.mark.parametrize('name,factory', SEQUENCE_ZOO.items())
+def test_compare_to_expected(name, factory, tmp_path):
     actual_path = tmp_path / f'{name}.seq'
     factory().write(str(actual_path))
     expected_path = Path(__file__).resolve().parent / 'expected_output' / f'{name}.seq'
