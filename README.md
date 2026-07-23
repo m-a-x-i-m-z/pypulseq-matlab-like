@@ -12,11 +12,11 @@
 
 </p>
 
-# PyPulseq-Matlab-like: A PyPython package strongly aligned to the Pulseq-Matlab version
+# PyPulseq-Matlab-like: An exprimental PyPython package strongly aligned to the Pulseq-Matlab version
 
-This project was create to bridge the gap between the *original* Pulseq implementation in Matlab and its Python counterpart. It currently implements all v1.5.1 Pulseq features. This project has a temporarily and experimental nature and serves a possible step towards achieving a better compatibility between two projects. The long term goal is to transition to PyPulseq fully.
+This project was created to bridge the gap between the *original* Pulseq implementation in Matlab and its current Python counterpart. Currently it implements all v1.5.1 Pulseq features, mirror all test cases from the Matlab test suite and contains all demo sequences from the Matlab Pulseq repository. This project has a temporarily and experimental nature and serves a possible step towards achieving a better compatibility between two projects. The long term goal is to transition to PyPulseq fully.
 
-## Table of contents 🧾
+## Table of contents
 
 1. [📃 General Information][section-general-info]
 2. [🔨 Installation][section-installation]
