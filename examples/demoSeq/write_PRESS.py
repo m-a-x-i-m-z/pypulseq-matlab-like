@@ -6,21 +6,21 @@ import os
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_trapezoid import make_trapezoid
-from pypulseq.make_adc import make_adc
-from pypulseq.make_slr_pulse import make_slr_pulse
-from pypulseq.make_gauss_pulse import make_gauss_pulse
-from pypulseq.make_delay import make_delay
-from pypulseq.make_extended_trapezoid import make_extended_trapezoid
-from pypulseq.make_extended_trapezoid_area import make_extended_trapezoid_area
-from pypulseq.calc_duration import calc_duration
-from pypulseq.calc_rf_center import calc_rf_center
-from pypulseq.add_gradients import add_gradients
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_slr_pulse import make_slr_pulse
+from pypulseq_matlab_like.make_gauss_pulse import make_gauss_pulse
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.make_extended_trapezoid import make_extended_trapezoid
+from pypulseq_matlab_like.make_extended_trapezoid_area import make_extended_trapezoid_area
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.calc_rf_center import calc_rf_center
+from pypulseq_matlab_like.add_gradients import add_gradients
 
 # Check for check_timing
-from pypulseq.check_timing import check_timing
+from pypulseq_matlab_like.check_timing import check_timing
 
 # System limits
 system = Opts(max_grad=15, grad_unit='mT/m', max_slew=100, slew_unit='T/m/s',

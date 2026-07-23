@@ -2,8 +2,8 @@ import math
 
 import numpy as np
 import pytest
-from pypulseq import Opts, calc_duration, make_extended_trapezoid, make_extended_trapezoid_area
-from pypulseq.utils.cumsum import cumsum
+from pypulseq_matlab_like import Opts, calc_duration, make_extended_trapezoid, make_extended_trapezoid_area
+from pypulseq_matlab_like.utils.cumsum import cumsum
 
 system = Opts()
 

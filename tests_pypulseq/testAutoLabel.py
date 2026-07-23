@@ -1,5 +1,5 @@
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def _build_test_seq(lines):

@@ -7,16 +7,16 @@ import copy
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_gauss_pulse import make_gauss_pulse
-from pypulseq.make_adc import make_adc
-from pypulseq.make_extended_trapezoid import make_extended_trapezoid
-from pypulseq.make_delay import make_delay
-from pypulseq.calc_duration import calc_duration
-from pypulseq.calc_rf_bandwidth import calc_rf_bandwidth
-from pypulseq.rotate import rotate
-from pypulseq.align import align
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_gauss_pulse import make_gauss_pulse
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_extended_trapezoid import make_extended_trapezoid
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.calc_rf_bandwidth import calc_rf_bandwidth
+from pypulseq_matlab_like.rotate import rotate
+from pypulseq_matlab_like.align import align
 
 def spherical_samples(Kr, dK, R):
     Ns = int(np.ceil(4 * np.pi * ((Kr / dK)**2) / R))

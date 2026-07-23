@@ -1,8 +1,8 @@
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
-from pypulseq import scale_grad
-from pypulseq.opts import Opts
+from pypulseq_matlab_like import scale_grad
+from pypulseq_matlab_like.opts import Opts
 
 # Updated gradients with realistic hardware limits
 grad_list = [

@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 """
 Read a sequence into MATLAB. The `Sequence` class provides an implementation of the _open file format_ for MR sequences

@@ -6,7 +6,7 @@ combination with integrated image reconstruction or to guide the off-line recons
 
 import numpy as np
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def main(

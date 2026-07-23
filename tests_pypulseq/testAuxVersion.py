@@ -1,5 +1,5 @@
 import pypulseq
-from pypulseq.Sequence.sequence import Sequence
+from pypulseq_matlab_like.Sequence.sequence import Sequence
 
 
 def _version_fields():

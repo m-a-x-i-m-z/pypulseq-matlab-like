@@ -8,7 +8,7 @@ parameters like TE, TR, or other delays at the scanner.
 
 import numpy as np
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def main():

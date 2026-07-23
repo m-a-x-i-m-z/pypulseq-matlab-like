@@ -44,52 +44,48 @@ If you use PyPulseq in your work, please cite the publications listed under [Ref
 
 ---
 
-## 2. 🔨 Installation
+## 2. Installation
 
-PyPulseq is available on the python Package Index [PyPi](https://pypi.org/project/pypulseq/) and can be installed using the command
+In contrast to PyPulseq, PyPulseq-Matlab-like is not available on the python Package Index and cannot be installed using the `pip` command directly.
+
+Instead, you can use  `pip` either with the direct link to the remote GitHub repository or by specifying a path to a locally-stored version. To install a branch (`master` branch in this example) of this repository use the command:
 
 ```bash
-pip install pypulseq
+pip install git+https://github.com/m-a-x-i-m-z/pypulseq-matlab-like@master
+```
+
+To install a locally-stored version of the PyPulseq-Matlab-like package use the command:
+
+```bash
+pip install path_to_directory_containing_this_repository
 ```
 
 To use the [sigpy](https://sigpy.readthedocs.io/en/latest/) functionality of `make_sigpy_pulse.py` run `pip install pypulseq[sigpy]` to install the required dependencies and enable this functionality.
 
-The latest features and minor bug fixes might not be included in the latest release version. If you want to use the bleeding edge version of PyPulseq, you can install it directly from the development branch of this repository using the command
-
-```bash
-pip install git+https://github.com/imr-framework/pypulseq@master
-```
-
-👉 PyPulseq is **now available on conda**. It can be installed using the command
-
-```bash
-conda install conda-forge::pypulseq
-```
-
 ---
 
-## 3. ⚡ Lightning-start - PyPulseq in your browser
+## 3. Lightning-start - PyPulseq in your browser
 
 1. Create a new notebook on [Google Colab][google-colab]
-2. Install PyPulseq using `pip install pypulseq`
+2. Install PyPulseq using `pip install git+https://github.com/m-a-x-i-m-z/pypulseq-matlab-like@master`
 3. Get going!
 
 ---
 
-## 4. 🏃‍♂ Example scripts
+## 4. Example scripts
 
 The PyPulseq repository contains several example sequences in the [examples](/examples/) folder. Every example script or example notebook creates a pulse sequence, plots the pulse timing diagram and finally saves the sequence as a `.seq` file to disk.
 
 ---
 
-## 5. 🤿 Deep dive - custom pulse sequences
+## 5. Deep dive - custom pulse sequences
 
 Getting started with pulse sequence design using `PyPulseq` is simple:
 
 1. First, define system limits in `Opts` and then create a `Sequence` object with it:
 
     ```python
-    import pypulseq as pp
+    import pypulseq_matlab_like as pp
 
     system = pp.Opts(max_grad=32, grad_unit='mT/m', max_slew=130, slew_unit='mT/m/ms')
     seq = pp.Sequence(system=system)
@@ -133,14 +129,14 @@ Getting started with pulse sequence design using `PyPulseq` is simple:
 
 ---
 
-## 6. 👥 Contributing and Community guidelines
+## 6. Contributing and Community guidelines
 
-`PyPulseq` adheres to a code of conduct adapted from the [Contributor Covenant] code of conduct.
+`PyPulseq-Matlab-like` adheres to a code of conduct adapted from the [Contributor Covenant] code of conduct.
 Contributing guidelines can be found [here][contrib-guidelines].
 
 ---
 
-## 7. 📖 References
+## 7. References
 
 1. Ravi, Keerthi, Sairam Geethanath, and John Vaughan. "PyPulseq: A Python Package for MRI Pulse Sequence Design."
 Journal of Open Source Software 4.42 (2019): 1725.

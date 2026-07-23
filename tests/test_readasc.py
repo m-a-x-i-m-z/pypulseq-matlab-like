@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pypulseq.utils.siemens.readasc import readasc
+from pypulseq_matlab_like.utils.siemens.readasc import readasc
 
 
 def _write_text(path: Path, text: str) -> None:

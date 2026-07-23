@@ -7,10 +7,10 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 from _pytest.python_api import ApproxBase
-from pypulseq import Sequence
+from pypulseq_matlab_like import Sequence
 
 expected_output_path = Path(__file__).parent / 'expected_output'
 

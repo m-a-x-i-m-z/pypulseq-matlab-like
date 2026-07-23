@@ -4,7 +4,7 @@ import math
 import numpy as np
 import pytest
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def _verify_delay_duration(rf, delay_obj, ringdown_time):

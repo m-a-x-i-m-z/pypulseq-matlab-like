@@ -3,7 +3,7 @@ Test functions for the mod_grad_axis method in pypulseq.Sequence.
 """
 
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 
 

@@ -1,4 +1,4 @@
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def _contains(report, block, text):

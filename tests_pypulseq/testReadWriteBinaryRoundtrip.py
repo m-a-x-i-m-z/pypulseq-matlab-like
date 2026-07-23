@@ -4,7 +4,7 @@ import re
 import numpy as np
 import pytest
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 EXPECTED_OUTPUT = Path(__file__).resolve().parent / 'expected_output'

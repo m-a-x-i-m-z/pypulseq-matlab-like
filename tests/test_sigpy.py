@@ -3,10 +3,10 @@
 import importlib.util
 
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
-from pypulseq.opts import Opts
-from pypulseq.sigpy_pulse_opts import SigpyPulseOpts
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.sigpy_pulse_opts import SigpyPulseOpts
 
 
 def test_sigpy_import():
@@ -21,7 +21,7 @@ def test_sigpy_import():
 @pytest.mark.sigpy
 def test_slr():
     import sigpy.mri.rf as sigpy_rf
-    from pypulseq.make_sigpy_pulse import sigpy_n_seq
+    from pypulseq_matlab_like.make_sigpy_pulse import sigpy_n_seq
 
     slice_thickness = 3e-3
     flip_angle = np.pi / 2
@@ -83,7 +83,7 @@ def test_slr():
 @pytest.mark.sigpy
 def test_sms():
     import sigpy.mri.rf as sigpy_rf
-    from pypulseq.make_sigpy_pulse import sigpy_n_seq
+    from pypulseq_matlab_like.make_sigpy_pulse import sigpy_n_seq
 
     slice_thickness = 3e-3
     flip_angle = np.pi / 2

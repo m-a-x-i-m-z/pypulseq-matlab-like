@@ -1,6 +1,6 @@
 import pytest
-import pypulseq as pp
-from pypulseq.supported_labels_rf_use import get_supported_rf_uses
+import pypulseq_matlab_like as pp
+from pypulseq_matlab_like.supported_labels_rf_use import get_supported_rf_uses
 
 
 class TestMakeGaussPulse:

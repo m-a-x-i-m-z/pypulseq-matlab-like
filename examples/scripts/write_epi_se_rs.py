@@ -5,7 +5,7 @@ gradients combined with ramp-sampling.
 
 import numpy as np
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def main(

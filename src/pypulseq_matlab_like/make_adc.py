@@ -1,0 +1,217 @@
+import itertools
+from math import ceil, floor, gcd, isclose, prod
+from types import SimpleNamespace
+from typing import Tuple, Union
+
+import numpy as np
+
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.utils.tracing import trace, trace_enabled
+
+
+def make_adc(
+    num_samples: int,
+    delay: float = 0.0,
+    duration: float = 0.0,
+    dwell: float = 0.0,
+    freq_offset: float = 0.0,
+    phase_offset: float = 0.0,
+    system: Union[Opts, None] = None,
+    freq_ppm: float = 0.0,
+    phase_ppm: float = 0.0,
+    phase_modulation: Union[np.ndarray, None] = None,
+) -> SimpleNamespace:
+    """
+    Create an ADC readout event.
+
+    Parameters
+    ----------
+    num_samples: int
+        Number of readout samples.
+    system : Opts, default=Opts()
+        System limits. Default is a system limits object initialized to default values.
+    dwell : float, default=0
+        ADC dead time in seconds (s) after sampling.
+    duration : float, default=0
+        Duration in seconds (s) of ADC readout event with `num_samples` number of samples.
+    delay : float, default=0
+        Delay in seconds (s) of ADC readout event.
+    freq_offset : float, default=0
+        Frequency offset of ADC readout event.
+    phase_offset : float, default=0
+        Phase offset of ADC readout event.
+    freq_ppm : float, default=0
+        PPM frequency offset of ADC readout event.
+    phase_ppm : float, default=0
+        PPM phase offset of ADC readout event.
+    phase_modulation : Union[np.ndarray, None], default=None
+        Phase modulation array for FOV shifting.
+        If provided, it must have `num_samples` number of samples.
+
+    Returns
+    -------
+    adc : SimpleNamespace
+        ADC readout event.
+
+    Raises
+    ------
+    ValueError
+        If neither `dwell` nor `duration` are defined.
+    """
+    if system is None:
+        system = Opts.default
+
+    adc = SimpleNamespace()
+    adc.type = 'adc'
+    adc.num_samples = num_samples
+    adc.dwell = dwell
+    adc.delay = delay
+    adc.freq_offset = freq_offset
+    adc.phase_offset = phase_offset
+    adc.freq_ppm = freq_ppm
+    adc.phase_ppm = phase_ppm
+    adc.dead_time = system.adc_dead_time
+
+    if (dwell == 0 and duration == 0) or (dwell > 0 and duration > 0):
+        raise ValueError('Either dwell or duration must be defined')
+
+    if phase_modulation is not None and len(phase_modulation) != num_samples:
+        raise ValueError('ADC Phase modulation vector must have the same length as the number of samples')
+    adc.phase_modulation = [] if phase_modulation is None else phase_modulation
+
+    if duration > 0:
+        adc.dwell = duration / num_samples
+
+    if adc.dead_time > adc.delay:
+        adc.delay = adc.dead_time
+
+    if trace_enabled():
+        adc.trace = trace()
+
+    return adc
+
+
+def calc_adc_segments(
+    num_samples: int, dwell: float, system: Union[Opts, None] = None, mode: str = 'shorten'
+) -> Tuple[int, int]:
+    """Calculate splitting of the ADC in segments with equal samples.
+
+    Parameters
+    ----------
+    num_samples : int
+        Initial number of samples to split into segments.
+    dwell : float
+        Dwell time of the ADC in [s]
+    system : Opts, default=None
+       System limits. Default is a system limits object initialized to default values.
+    mode : str, default='shorten'
+        The total number of samples can either be shortened or lengthened to match the constraints.
+
+    Returns
+    -------
+    (num_segments, num_samples_seg): int, int
+        Number of segments and number of samples per segment.
+
+    Notes
+    -----
+    "On some scanners, notably Siemens, ADC objects that exceed a certain
+    sample length (8192 samples on Siemens) should be splittable to N
+    equal parts, each of which aligned to the gradient raster. Each
+    segment, however, needs to have the number of samples smaller than
+    system.adc_samples_limit' and divisible by system.adc_samples_divisor to be
+    executable on the scanner. The optional parameter mode can be either
+    'shorten' or 'lengthen'." [Matlab implementation of 'calcAdcSeg'. https://github.com/pulseq]
+
+    Raises
+    ------
+    ValueError
+        If 'mode' is not 'shorten' or 'lengthen'.
+    ValueError
+        If no suitable segmentation could be found.
+    ValueError
+        If number of segments exceeds 128.
+    """
+    # Define maximum number of segments for the ADC
+    max_segments = 128
+
+    if mode == 'lenghen':
+        mode = 'lengthen'
+    if mode not in ['shorten', 'lengthen']:
+        raise ValueError("In calc_adc_segments(..., mode) mode should be either 'shorten' or 'lengthen'")
+
+    if system is None:
+        system = Opts.default
+
+    # Check if single adc is sufficient
+    if system.adc_samples_limit <= 0:
+        return 1, num_samples
+
+    # Get minimum number of samples for which the adc duration
+    # is a multiple of grad raster time (GRT) and adc raster time (ART)
+    i_gr = round(system.grad_raster_time / system.adc_raster_time)  # GRT in units of ART
+    if not isclose(system.grad_raster_time / system.adc_raster_time, i_gr):
+        raise ValueError("System 'grad_raster_time' is not a multiple of 'adc_raster_time'.")
+
+    i_dwell = round(dwell / system.adc_raster_time)  # dwell in units of ART
+    if not isclose(dwell / system.adc_raster_time, i_dwell):
+        raise ValueError("'dwell' is not a multiple of system 'adc_raster_time'.")
+
+    i_common = (i_gr * i_dwell) // gcd(i_gr, i_dwell)
+    min_samples_segment = int(i_common / i_dwell)  # lcm(a,b)/b is always int
+
+    # Siemens: Number of Samples should be divisible by a divisor
+    gcd_adcdiv = gcd(min_samples_segment, system.adc_samples_divisor)
+    if gcd_adcdiv != system.adc_samples_divisor:
+        min_samples_segment = int(min_samples_segment * system.adc_samples_divisor / gcd_adcdiv)
+
+    # Get segment multiplier
+    if mode == 'shorten':
+        samples_seg_multip = floor(num_samples / min_samples_segment)
+    else:
+        samples_seg_multip = ceil(num_samples / min_samples_segment)
+    while samples_seg_multip > 0 and samples_seg_multip < (2 * num_samples / min_samples_segment):
+        # Get prime factors from segments multiplier
+        if samples_seg_multip == 1:
+            adc_seg_primes = [1]
+        else:
+            adc_seg_primes = []
+            n = samples_seg_multip
+            while n % 2 == 0:
+                adc_seg_primes.append(2)
+                n //= 2
+            i = 3
+            while i * i <= n:
+                while n % i == 0:
+                    adc_seg_primes.append(i)
+                    n //= i
+                i += 2
+            if n > 1:
+                adc_seg_primes.append(n)
+        num_segments = 1
+        if len(adc_seg_primes) > 1:
+            num_segments_candids = set()
+            for k in range(1, len(adc_seg_primes) + 1):
+                num_segments_candids |= {prod(perm) for perm in itertools.combinations(adc_seg_primes, k)}
+            # Find suitable candidate
+            for num_segments in sorted(num_segments_candids):
+                num_samples_seg = samples_seg_multip * min_samples_segment / num_segments
+                if num_samples_seg <= system.adc_samples_limit and num_segments <= max_segments:
+                    break  # Found segments and samples
+        else:  # Only one possible solution
+            num_samples_seg = samples_seg_multip * min_samples_segment
+
+        # Does output already fulfill constraints?
+        if num_samples_seg <= system.adc_samples_limit and num_segments <= max_segments:
+            break
+        else:  # Shorten or lengthen the number of samples per segment
+            samples_seg_multip += 1 if mode == 'lengthen' else -1
+
+    # Validate constraints
+    if samples_seg_multip <= 0:
+        raise ValueError('Could not find suitable segmentation.')
+    if num_samples_seg == 0:
+        raise ValueError('Could not find suitable number of samples per segment.')
+    if num_segments > max_segments:
+        raise ValueError(f'Number of segments ({num_segments}) exceeds allowed number of {max_segments}')
+
+    return int(num_segments), int(num_samples_seg)

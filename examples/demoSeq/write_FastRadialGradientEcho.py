@@ -6,19 +6,19 @@ import os
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_trapezoid import make_trapezoid
-from pypulseq.make_adc import make_adc
-from pypulseq.make_sinc_pulse import make_sinc_pulse
-from pypulseq.make_delay import make_delay
-from pypulseq.make_extended_trapezoid import make_extended_trapezoid
-from pypulseq.make_extended_trapezoid_area import make_extended_trapezoid_area
-from pypulseq.add_gradients import add_gradients
-from pypulseq.split_gradient_at import split_gradient_at
-from pypulseq.align import align
-from pypulseq.calc_duration import calc_duration
-from pypulseq.rotate import rotate
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_sinc_pulse import make_sinc_pulse
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.make_extended_trapezoid import make_extended_trapezoid
+from pypulseq_matlab_like.make_extended_trapezoid_area import make_extended_trapezoid_area
+from pypulseq_matlab_like.add_gradients import add_gradients
+from pypulseq_matlab_like.split_gradient_at import split_gradient_at
+from pypulseq_matlab_like.align import align
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.rotate import rotate
 
 # set system limits (slew rate 130 and max_grad 30 work on Prisma)
 # System limits

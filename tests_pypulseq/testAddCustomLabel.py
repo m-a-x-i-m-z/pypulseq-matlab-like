@@ -1,8 +1,8 @@
 import pytest
 
-from pypulseq import make_label
-from pypulseq import supported_labels_rf_use as labels_module
-from pypulseq.supported_labels_rf_use import add_supported_label, get_supported_labels
+from pypulseq_matlab_like import make_label
+from pypulseq_matlab_like import supported_labels_rf_use as labels_module
+from pypulseq_matlab_like.supported_labels_rf_use import add_supported_label, get_supported_labels
 
 
 @pytest.fixture(autouse=True)

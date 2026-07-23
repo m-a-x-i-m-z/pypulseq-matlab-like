@@ -6,15 +6,15 @@ import os
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_trapezoid import make_trapezoid
-from pypulseq.make_adc import make_adc
-from pypulseq.make_sinc_pulse import make_sinc_pulse
-from pypulseq.make_delay import make_delay
-from pypulseq.calc_duration import calc_duration
-from pypulseq.make_label import make_label
-from pypulseq.make_rf_shim import make_rf_shim
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_sinc_pulse import make_sinc_pulse
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.make_label import make_label
+from pypulseq_matlab_like.make_rf_shim import make_rf_shim
 
 # this is a demo GRE sequence, which uses LABEL extension to produce raw
 # data reconstuctable by the integrated image reconstruction on the scanner

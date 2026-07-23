@@ -11,19 +11,19 @@ def matlab_round(x):
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_trapezoid import make_trapezoid
-from pypulseq.make_adc import make_adc, calc_adc_segments
-from pypulseq.make_gauss_pulse import make_gauss_pulse
-from pypulseq.make_sinc_pulse import make_sinc_pulse
-from pypulseq.make_arbitrary_grad import make_arbitrary_grad
-from pypulseq.make_extended_trapezoid import make_extended_trapezoid
-from pypulseq.make_delay import make_delay
-from pypulseq.calc_duration import calc_duration
-from pypulseq.calc_rf_center import calc_rf_center
-from pypulseq.traj_to_grad import traj_to_grad
-from pypulseq.rotate import rotate
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.make_adc import make_adc, calc_adc_segments
+from pypulseq_matlab_like.make_gauss_pulse import make_gauss_pulse
+from pypulseq_matlab_like.make_sinc_pulse import make_sinc_pulse
+from pypulseq_matlab_like.make_arbitrary_grad import make_arbitrary_grad
+from pypulseq_matlab_like.make_extended_trapezoid import make_extended_trapezoid
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.calc_rf_center import calc_rf_center
+from pypulseq_matlab_like.traj_to_grad import traj_to_grad
+from pypulseq_matlab_like.rotate import rotate
 
 fov = 256e-3
 Nx = 256
@@ -95,7 +95,7 @@ ka = np.array([ka.real, ka.imag])
 
 dt = system.grad_raster_time / tos_calculation
 # `pypulseq.traj_to_grad` usually returns `grad_waveform`.
-# Wait, I need to check `traj_to_grad` signature from PyPulseq source or assume standard.
+# Wait, I need to check `traj_to_grad` signature from pypulseq_matlab_like source or assume standard.
 # Assuming it returns `grad` (complex or 2-row).
 # But here `ka` is 2-row.
 # `traj_to_grad` in python might handle 2D.
@@ -206,7 +206,7 @@ for s in range(Nslices):
     seq.add_block(*rotate(gx_spoil, gy_spoil, gz_spoil, angle=phi, axis='z'))
 
 if interleaves > 1:
-    from pypulseq.TransformFOV.transform_fov import transform_fov
+    from pypulseq_matlab_like.TransformFOV.transform_fov import transform_fov
     n_blocks_orig = len(seq.block_durations)
     for i in range(2, interleaves + 1):
         seq.add_block(make_delay(TRdelay))

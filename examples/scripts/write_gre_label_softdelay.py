@@ -30,7 +30,7 @@ where multiple delays interact to maintain sequence constraints.
 
 import numpy as np
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def main(

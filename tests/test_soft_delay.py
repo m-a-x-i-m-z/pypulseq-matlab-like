@@ -2,7 +2,7 @@
 Tests for soft delay functionality including numID auto-assignment and validation.
 """
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 
 

@@ -2,7 +2,7 @@ import importlib.util
 
 import numpy as np
 import pytest
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 pytestmark = pytest.mark.skipif(importlib.util.find_spec('sigpy') is None, reason='sigpy not available')

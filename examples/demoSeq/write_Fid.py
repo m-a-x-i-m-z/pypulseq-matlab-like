@@ -6,12 +6,12 @@ import os
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_block_pulse import make_block_pulse
-from pypulseq.make_adc import make_adc
-from pypulseq.make_delay import make_delay
-from pypulseq.calc_duration import calc_duration
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_block_pulse import make_block_pulse
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.calc_duration import calc_duration
 
 # System limits
 system = Opts(rf_ringdown_time=20e-6, rf_dead_time=100e-6, adc_dead_time=20e-6)

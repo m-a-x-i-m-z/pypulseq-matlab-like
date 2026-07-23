@@ -6,19 +6,19 @@ import os
 # Add pypulseq source to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from pypulseq.Sequence.sequence import Sequence
-from pypulseq.opts import Opts
-from pypulseq.make_trapezoid import make_trapezoid
-from pypulseq.make_adc import make_adc
-from pypulseq.make_sinc_pulse import make_sinc_pulse
-from pypulseq.make_delay import make_delay
-from pypulseq.make_gauss_pulse import make_gauss_pulse
-from pypulseq.make_digital_output_pulse import make_digital_output_pulse
-from pypulseq.split_gradient_at import split_gradient_at
-from pypulseq.align import align
-from pypulseq.add_gradients import add_gradients
-from pypulseq.calc_duration import calc_duration
-from pypulseq.calc_rf_center import calc_rf_center
+from pypulseq_matlab_like.Sequence.sequence import Sequence
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.make_adc import make_adc
+from pypulseq_matlab_like.make_sinc_pulse import make_sinc_pulse
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.make_gauss_pulse import make_gauss_pulse
+from pypulseq_matlab_like.make_digital_output_pulse import make_digital_output_pulse
+from pypulseq_matlab_like.split_gradient_at import split_gradient_at
+from pypulseq_matlab_like.align import align
+from pypulseq_matlab_like.add_gradients import add_gradients
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.calc_rf_center import calc_rf_center
 
 # this is an experimental high-performance EPI sequence
 

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from pypulseq.compress_shape import compress_shape
-from pypulseq.decompress_shape import decompress_shape
+from pypulseq_matlab_like.compress_shape import compress_shape
+from pypulseq_matlab_like.decompress_shape import decompress_shape
 
 from . import assert_equal
 

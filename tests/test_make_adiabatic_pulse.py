@@ -7,8 +7,8 @@ import itertools
 
 import numpy as np
 import pytest
-from pypulseq import make_adiabatic_pulse
-from pypulseq.supported_labels_rf_use import get_supported_rf_uses
+from pypulseq_matlab_like import make_adiabatic_pulse
+from pypulseq_matlab_like.supported_labels_rf_use import get_supported_rf_uses
 
 
 def test_pulse_select():

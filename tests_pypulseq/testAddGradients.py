@@ -1,5 +1,5 @@
 import pytest
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 from . import assert_equal
 

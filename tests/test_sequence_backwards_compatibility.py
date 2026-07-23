@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 
 data_path = Path(__file__).parent / 'expected_output'

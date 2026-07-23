@@ -1,0 +1,200 @@
+import math
+from copy import copy
+from types import SimpleNamespace
+from typing import Tuple, Union
+from warnings import warn
+
+import numpy as np
+
+from pypulseq_matlab_like.calc_rf_center import calc_rf_center
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.make_trapezoid import make_trapezoid
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.supported_labels_rf_use import get_supported_rf_uses
+from pypulseq_matlab_like.utils.tracing import trace, trace_enabled
+
+
+def make_arbitrary_rf(
+    signal: np.ndarray,
+    flip_angle: float,
+    bandwidth: float = 0.0,
+    delay: float = 0.0,
+    dwell: float = 0.0,
+    freq_offset: float = 0.0,
+    no_signal_scaling: bool = False,
+    max_grad: float = 0.0,
+    max_slew: float = 0.0,
+    phase_offset: float = 0.0,
+    return_gz: bool = False,
+    return_delay: bool = False,
+    slice_thickness: float = 0.0,
+    system: Union[Opts, None] = None,
+    time_bw_product: float = 0.0,
+    use: str = 'undefined',
+    freq_ppm: float = 0.0,
+    phase_ppm: float = 0.0,
+    center: Union[float, None] = None,
+) -> Union[SimpleNamespace, Tuple[SimpleNamespace, SimpleNamespace]]:
+    """
+    Create an RF pulse with the given pulse shape.
+
+    Parameters
+    ----------
+    signal : numpy.ndarray
+        Arbitrary waveform.
+    flip_angle : float
+        Flip angle in radians.
+    bandwidth : float, default=0
+        Bandwidth in Hertz (Hz).
+    delay : float, default=0
+        Delay in seconds (s) of accompanying slice select trapezoidal event.
+    dwell : float, default=0
+        Temporal sampling step of waveform. If set to 0, will use `system.rf_raster_time`.
+    freq_offset : float, default=0
+        Frequency offset in Hertz (Hz).
+    no_signal_scaling : bool, default=False
+        If set to True no rescaling of the RF amplitude will happen. E.g. for adiabatic pulses.
+    max_grad : float, default=system.max_grad
+        Maximum gradient strength of accompanying slice select trapezoidal event.
+    max_slew : float, default=system.max_slew
+        Maximum slew rate of accompanying slice select trapezoidal event.
+    phase_offset : float, default=0
+        Phase offset in Hertz (Hz).a
+    return_gz : bool, default=False
+        Boolean flag to indicate if slice-selective gradient has to be returned.
+    slice_thickness : float, default=0
+        Slice thickness (m) of accompanying slice select trapezoidal event. The slice thickness determines the area of the
+        slice select event.
+    system : Opts, default=Opts()
+        System limits.
+    time_bw_product : float, default=0
+        Time-bandwidth product.
+    use : str, default='undefined'
+        Use of arbitrary radio-frequency pulse event.
+        Must be one of 'excitation', 'refocusing', 'inversion',
+        'saturation', 'preparation', 'other', 'undefined'.
+    freq_ppm : float, default=0
+        PPM frequency offset.
+    phase_ppm : float, default=0
+        PPM phase offset.
+    center : float, default=None
+        RF center (s).
+
+    Returns
+    -------
+    rf : SimpleNamespace
+        Radio-frequency pulse event with arbitrary pulse shape.
+    gz : SimpleNamespace, optional
+        Slice select trapezoidal gradient event accompanying the arbitrary radio-frequency pulse event.
+
+    Raises
+    ------
+    ValueError
+        If invalid `use` parameter is passed.
+        If `signal` with ndim > 1 is passed.
+        If `return_gz=True`, and `slice_thickness` and `bandwidth` are not passed.
+    """
+    if system is None:
+        system = Opts.default
+
+    valid_pulse_uses = get_supported_rf_uses()
+    if use != '' and use not in valid_pulse_uses:
+        raise ValueError(f'Invalid use parameter. Must be one of {valid_pulse_uses}. Passed: {use}')
+
+    if dwell == 0:
+        dwell = system.rf_raster_time
+
+    signal = np.squeeze(signal)
+    if signal.ndim > 1:
+        raise ValueError(f'signal should have ndim=1. Passed ndim={signal.ndim}')
+
+    if not no_signal_scaling:
+        signal = signal / np.abs(np.sum(signal * dwell)) * flip_angle / (2 * np.pi)
+
+    n_samples = len(signal)
+    duration = n_samples * dwell
+    t = (np.arange(1, n_samples + 1) - 0.5) * dwell
+
+    rf = SimpleNamespace()
+    rf.type = 'rf'
+    rf.signal = signal
+    rf.t = t
+    rf.shape_dur = duration
+    rf.freq_offset = freq_offset
+    rf.phase_offset = phase_offset
+    rf.freq_ppm = freq_ppm
+    rf.phase_ppm = phase_ppm
+    rf.dead_time = system.rf_dead_time
+    rf.ringdown_time = system.rf_ringdown_time
+    rf.delay = delay
+    rf.use = use
+
+    if rf.dead_time > rf.delay:
+        warn(
+            f'Specified RF delay {rf.delay * 1e6:.2f} us is less than the dead time {rf.dead_time * 1e6:.0f} us. Delay was increased to the dead time.',
+            stacklevel=2,
+        )
+        rf.delay = rf.dead_time
+
+    if center is not None:
+        rf.center = center
+        if rf.center < 0:
+            rf.center = 0
+        if rf.center > rf.shape_dur:
+            rf.center = rf.shape_dur
+    else:
+        rf.center, _ = calc_rf_center(rf)
+
+    if time_bw_product > 0 and bandwidth > 0:
+        raise ValueError("Both 'bandwidth' and 'time_bw_product' cannot be specified at the same time.")
+
+    if return_gz:
+        if slice_thickness <= 0:
+            raise ValueError('Slice thickness must be provided.')
+        if bandwidth <= 0:
+            raise ValueError('Bandwidth of pulse must be provided.')
+
+        if max_grad > 0:
+            system = copy(system)
+            system.max_grad = max_grad
+        if max_slew > 0:
+            system = copy(system)
+            system.max_slew = max_slew
+
+        if time_bw_product > 0:
+            bandwidth = time_bw_product / duration
+
+        amplitude = bandwidth / slice_thickness
+        area = amplitude * duration
+        gz = make_trapezoid(channel='z', system=system, flat_time=duration, flat_area=area)
+
+        if rf.delay > gz.rise_time:
+            # Round-up to gradient raster
+            gz.delay = math.ceil((rf.delay - gz.rise_time) / system.grad_raster_time) * system.grad_raster_time
+
+        if rf.delay < (gz.rise_time + gz.delay):
+            rf.delay = gz.rise_time + gz.delay
+
+    rf_amplitude = np.max(np.abs(rf.signal))
+    if hasattr(system, 'max_b1') and rf_amplitude > system.max_b1:
+        warn(
+            f'system maximum RF amplitude exceeded ({rf_amplitude / system.max_b1 * 100:.1f}%)',
+            stacklevel=2,
+        )
+
+    if trace_enabled():
+        rf.trace = trace()
+
+    if return_gz:
+        if return_delay:
+            gzr = make_trapezoid(
+                channel='z',
+                system=system,
+                area=-area * (1 - rf.center / rf.shape_dur) - 0.5 * (gz.area - area),
+            )
+            return rf, gz, gzr, make_delay(calc_duration(rf))
+        return rf, gz
+    if return_delay:
+        return rf, make_delay(calc_duration(rf))
+    return rf

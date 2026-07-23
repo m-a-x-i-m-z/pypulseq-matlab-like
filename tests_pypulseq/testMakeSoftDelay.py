@@ -1,5 +1,5 @@
 import pytest
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 class TestMakeSoftDelay:

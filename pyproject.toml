@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pypulseq"
-version = "1.5.0.post1"
+name = "pypulseq_matlab_like"
+version = "1.5.1"
 authors = [{ name = "Keerthi Sravan Ravi", email = "ks3621@columbia.edu" }]
 maintainers = [
   { name = "Bilal Tasdelen" },
@@ -13,7 +13,7 @@ maintainers = [
   { name = "Sairam Geethanath" },
   { name = "Matteo Cencini" },
 ]
-description = "Pulseq in Python"
+description = "Pulseq in Python but like in Matlab"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.8"
@@ -44,8 +44,8 @@ test = [
 docs = ["sphinx", "jinja2", "furo", "recommonmark"]
 
 [project.urls]
-Homepage = "https://github.com/imr-framework/pypulseq"
-Issues = "https://github.com/imr-framework/pypulseq/issues"
+Homepage = "https://github.com/m-a-x-i-m-z/pypulseq-matlab-like"
+Issues = "https://github.com/m-a-x-i-m-z/pypulseq-matlab-like/issues"
 Documentation = "https://pypulseq.readthedocs.io/en/latest/"
 
 [tool.setuptools]

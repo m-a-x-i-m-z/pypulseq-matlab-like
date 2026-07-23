@@ -1,4 +1,4 @@
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 
 # Gradient definitions used in tests

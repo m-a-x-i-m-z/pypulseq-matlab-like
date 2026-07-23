@@ -2,7 +2,7 @@
 
 from itertools import combinations_with_replacement
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 import pytest
 
 

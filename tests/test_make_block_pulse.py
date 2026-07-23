@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from pypulseq import make_block_pulse
+from pypulseq_matlab_like import make_block_pulse
 
 
 def test_invalid_use_error():

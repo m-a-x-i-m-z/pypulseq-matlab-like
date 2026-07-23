@@ -4,7 +4,7 @@ import math
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 
 
 def create_test_sequence():

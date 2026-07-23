@@ -3,8 +3,8 @@ import math
 import numpy as np
 import pytest
 
-import pypulseq as pp
-from pypulseq.rotate_3d import rotate_3d
+import pypulseq_matlab_like as pp
+from pypulseq_matlab_like.rotate_3d import rotate_3d
 
 
 def _grad(channel, area=1000, system=None):

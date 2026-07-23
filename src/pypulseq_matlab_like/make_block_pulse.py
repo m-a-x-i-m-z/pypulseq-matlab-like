@@ -1,0 +1,141 @@
+from types import SimpleNamespace
+from typing import Union
+from warnings import warn
+
+import numpy as np
+
+from pypulseq_matlab_like.calc_duration import calc_duration
+from pypulseq_matlab_like.make_delay import make_delay
+from pypulseq_matlab_like.opts import Opts
+from pypulseq_matlab_like.supported_labels_rf_use import get_supported_rf_uses
+from pypulseq_matlab_like.utils.tracing import trace, trace_enabled
+
+
+def make_block_pulse(
+    flip_angle: float,
+    delay: float = 0.0,
+    duration: Union[float, None] = None,
+    bandwidth: Union[float, None] = None,
+    time_bw_product: Union[float, None] = None,
+    freq_offset: float = 0.0,
+    phase_offset: float = 0.0,
+    system: Union[Opts, None] = None,
+    use: str = 'undefined',
+    freq_ppm: float = 0.0,
+    phase_ppm: float = 0.0,
+    return_delay: bool = False,
+) -> SimpleNamespace:
+    """
+    Create a block (RECT or hard) pulse.
+
+    Define duration, or bandwidth, or bandwidth and time_bw_product.
+    If none are provided a default 4 ms pulse will be generated.
+
+    Parameters
+    ----------
+    flip_angle : float
+        Flip angle in radians.
+    delay : float, default=0
+        Delay in seconds (s).
+    duration : float, default=None
+        Duration in seconds (s).
+    bandwidth : float, default=None
+        Bandwidth in Hertz (Hz).
+        If supplied without time_bw_product duration = 1 / (4 * bandwidth)
+    time_bw_product : float, default=None
+        Time-bandwidth product.
+        If supplied with bandwidth, duration = time_bw_product / bandwidth
+    freq_offset : float, default=0
+        Frequency offset in Hertz (Hz).
+    phase_offset : float, default=0
+        Phase offset Hertz (Hz).
+    system : Opts, default=Opts()
+        System limits.
+    use : str, default='undefined'
+        Use of radio-frequency block pulse event.
+        Must be one of 'excitation', 'refocusing', 'inversion',
+        'saturation', 'preparation', 'other', 'undefined'.
+    freq_ppm : float, default=0
+        PPM frequency offset.
+    phase_ppm : float, default=0
+        PPM phase offset.
+
+    Returns
+    -------
+    rf : SimpleNamespace
+        Radio-frequency block pulse event.
+
+    Raises
+    ------
+    ValueError
+        If invalid `use` parameter is passed.
+        One of bandwidth or duration must be defined, but not both.
+        One of bandwidth or duration must be defined and be > 0.
+    """
+    if system is None:
+        system = Opts.default
+
+    valid_pulse_uses = get_supported_rf_uses()
+    if use != '' and use not in valid_pulse_uses:
+        raise ValueError(f'Invalid use parameter. Must be one of {valid_pulse_uses}. Passed: {use}')
+
+    if duration is None and bandwidth is None:
+        raise ValueError('Either bandwidth or duration must be defined.')
+    elif duration is not None and bandwidth is not None and duration > 0:
+        # Multiple arguments
+        raise ValueError('One of bandwidth or duration must be defined, but not both.')
+    elif duration is not None and duration > 0:
+        # Explicitly handle this most expected case.
+        # There is probably a better way of writing this if block
+        pass
+    elif duration is None and bandwidth is not None and bandwidth > 0:
+        if time_bw_product is not None and time_bw_product > 0:
+            duration = time_bw_product / bandwidth
+        else:
+            duration = 1 / (4 * bandwidth)
+    else:
+        # Invalid arguments
+        raise ValueError(
+            'One of bandwidth or duration must be defined and be > 0. '
+            f'duration = {duration} s, bandwidth = {bandwidth} Hz.'
+        )
+
+    n_samples = round(duration / system.rf_raster_time)
+    t = np.array([0, n_samples]) * system.rf_raster_time
+    signal = flip_angle / (2 * np.pi) / duration * np.ones_like(t)
+
+    rf = SimpleNamespace()
+    rf.type = 'rf'
+    rf.signal = signal
+    rf.t = t
+    rf.shape_dur = t[-1]
+    rf.freq_offset = freq_offset
+    rf.phase_offset = phase_offset
+    rf.freq_ppm = freq_ppm
+    rf.phase_ppm = phase_ppm
+    rf.dead_time = system.rf_dead_time
+    rf.ringdown_time = system.rf_ringdown_time
+    rf.delay = delay
+    rf.center = rf.shape_dur / 2
+    rf.use = use
+
+    if rf.dead_time > rf.delay:
+        warn(
+            f'Specified RF delay {rf.delay * 1e6:.2f} us is less than the dead time {rf.dead_time * 1e6:.0f} us. Delay was increased to the dead time.',
+            stacklevel=2,
+        )
+        rf.delay = rf.dead_time
+
+    rf_amplitude = np.max(np.abs(rf.signal))
+    if hasattr(system, 'max_b1') and rf_amplitude > system.max_b1:
+        warn(
+            f'system maximum RF amplitude exceeded ({rf_amplitude / system.max_b1 * 100:.1f}%)',
+            stacklevel=2,
+        )
+
+    if trace_enabled():
+        rf.trace = trace()
+
+    if return_delay:
+        return rf, make_delay(calc_duration(rf))
+    return rf

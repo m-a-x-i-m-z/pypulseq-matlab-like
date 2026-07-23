@@ -1,7 +1,7 @@
 """Tests for the make_trapezoid module"""
 
 import pytest
-from pypulseq import Opts, eps, make_trapezoid
+from pypulseq_matlab_like import Opts, eps, make_trapezoid
 
 
 def test_channel_error():

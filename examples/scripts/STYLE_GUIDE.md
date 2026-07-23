@@ -17,7 +17,7 @@ For a more advanced example, see `write_gre_label_softdelay.py`.
 - Variables derived from or related to another variable should **start with the referring
   variable name** (e.g., `te_delay`, `te_min`, `tr_delay`, `adc_duration`, `gx_flat_time`).
 - Use `np.deg2rad()` for flip angle conversions, never manual `* np.pi / 180`.
-- Import PyPulseq consistently as `import pypulseq as pp`.
+- import pypulseq_matlab_like consistently as `import pypulseq_matlab_like as pp`.
 
 ---
 
@@ -30,7 +30,7 @@ Every example script should follow this structure:
 ```python
 import numpy as np
 
-import pypulseq as pp
+import pypulseq_matlab_like as pp
 ```
 
 Third-party imports first, then PyPulseq — separated by blank lines.
@@ -250,6 +250,6 @@ te_delay = np.ceil(
 - **No uppercase variable names** for sequence parameters (e.g., use `te`, not `TE`).
 - **No `import math`** — use `numpy` equivalents (`np.ceil`, `np.floor`, `np.sqrt`,
   `np.pi`, etc.) instead of `math` functions.
-- **No `from pypulseq import ...`** — always use `import pypulseq as pp`.
+- **No `from pypulseq_matlab_like import ...`** — always use `import pypulseq_matlab_like as pp`.
 - **No conditional `set_definition`** — always set FOV and Name definitions, not only
   inside `if write_seq`.

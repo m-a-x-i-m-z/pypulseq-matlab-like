@@ -1,6 +1,6 @@
 import numpy as np
 
-from pypulseq.calc_rf_bandwidth import __find_flank as find_flank
+from pypulseq_matlab_like.calc_rf_bandwidth import __find_flank as find_flank
 
 from . import assert_equal
 
