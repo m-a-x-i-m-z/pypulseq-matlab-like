@@ -30,7 +30,7 @@ from pypulseq_matlab_like.Sequence.auto_label import auto_label
 from pypulseq_matlab_like.Sequence.calc_grad_spectrum import calculate_gradient_spectrum
 from pypulseq_matlab_like.Sequence.calc_moments_b_tensor import calc_moments_b_tensor
 from pypulseq_matlab_like.Sequence.calc_pns import calc_pns
-from pypulseq_matlab_like.Sequence.ext_test_report import ext_test_report
+from pypulseq_matlab_like.Sequence.ext_test_report import ext_test_report_str, ext_test_report_data
 from pypulseq_matlab_like.Sequence.install import detect_scanner
 from pypulseq_matlab_like.Sequence.read_binary import read_binary
 from pypulseq_matlab_like.Sequence.read_seq import read
@@ -2232,7 +2232,39 @@ class Sequence:
         """
         Analyze the sequence and return a text report.
         """
-        return ext_test_report(self)
+        return ext_test_report_str(ext_test_report_data(self))
+
+    def test_report_dict(self) -> dict:
+        """
+        Analyze the sequence and return statistics as a dictionary.
+
+        This method provides programmatic access to sequence statistics without
+        needing to parse the formatted string output of test_report().
+
+        Returns
+        -------
+        data : dict
+            Dictionary containing sequence statistics with the following keys:
+            - num_blocks: int
+            - event_count: dict with keys 'rf', 'gx', 'gy', 'gz', 'adc', 'delay', 'extensions'
+            - libraries: dict with keys 'RF', 'Gradient', 'Shape', 'ADC', 'Extension', 'Trigger', 'Label set', 'Label inc', 'RF shim', 'Rotation', 'Soft delay'
+            - duration: float (seconds)
+            - TE: float (seconds)
+            - TR: float (seconds)
+            - flip_angles_deg: list of float
+            - unique_k_positions: np.ndarray
+            - dimensions: int (if applicable)
+            - spatial_resolution_mm: list of float (if applicable)
+            - repetitions: dict with 'median', 'min', 'max' (if applicable)
+            - is_cartesian: bool (if applicable)
+            - max_gradient: dict with 'per_channel_Hz_m', 'per_channel_mT_m',
+              'absolute_Hz_m', 'absolute_mT_m'
+            - max_slew_rate: dict with 'per_channel_Hz_m_s', 'per_channel_T_m_s',
+              'absolute_Hz_m_s', 'absolute_T_m_s'
+            - timing_ok: bool
+            - timing_error_report: list
+        """
+        return ext_test_report_data(self)
 
     def waveforms(
         self,
