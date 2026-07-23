@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from . import assert_equal, quat_wxyz_to_xyzw, quat_xyzw_to_wxyz
+from util import assert_equal, quat_wxyz_to_xyzw, quat_xyzw_to_wxyz
 
 
 def _normalise(q):

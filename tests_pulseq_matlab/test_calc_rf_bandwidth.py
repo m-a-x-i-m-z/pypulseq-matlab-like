@@ -1,7 +1,7 @@
 import numpy as np
 import pypulseq_matlab_like as pp
 
-from . import assert_equal
+from util import assert_equal
 
 
 def _calc_rf_bandwidth_matlab_outputs(rf, cutoff=0.5):

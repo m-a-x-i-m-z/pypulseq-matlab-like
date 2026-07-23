@@ -2,7 +2,7 @@ import numpy as np
 import pypulseq_matlab_like as pp
 from pathlib import Path
 
-from . import assert_equal
+from util import assert_equal
 
 
 class TestCalcADCSegments:

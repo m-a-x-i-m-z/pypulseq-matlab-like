@@ -2,7 +2,7 @@ import numpy as np
 
 from pypulseq_matlab_like.calc_rf_bandwidth import __find_flank as find_flank
 
-from . import assert_equal
+from util import assert_equal
 
 
 class TestAuxFindFlank:
