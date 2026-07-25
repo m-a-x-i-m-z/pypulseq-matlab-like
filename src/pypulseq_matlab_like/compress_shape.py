@@ -33,6 +33,9 @@ def compress_shape(decompressed_shape: np.ndarray, force_compression: bool = Fal
     if any(not math.isfinite(float(value)) for value in decompressed_shape):
         raise ValueError('compress_shape() received infinite samples.')
 
+    decompressed_shape = np.array(decompressed_shape, copy=True)
+    decompressed_shape[decompressed_shape == 0] = 0.0
+
     if not force_compression and len(decompressed_shape) <= 4:  # Avoid compressing very short shapes
         compressed_shape = SimpleNamespace()
         compressed_shape.num_samples = len(decompressed_shape)
