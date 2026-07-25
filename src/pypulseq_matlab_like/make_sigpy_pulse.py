@@ -7,14 +7,6 @@ from warnings import warn
 import numpy as np
 from scipy import signal as sp_signal
 
-try:
-    import sigpy.mri.rf as rf
-    import sigpy.plot as pl
-except ModuleNotFoundError as err:
-    raise ModuleNotFoundError(
-        "SigPy is not installed. Install it using 'pip install sigpy' or 'pip install pypulseq[sigpy]'."
-    ) from err
-
 from pypulseq_matlab_like.calc_rf_center import calc_rf_center
 from pypulseq_matlab_like.calc_duration import calc_duration
 from pypulseq_matlab_like.make_delay import make_delay
@@ -23,6 +15,30 @@ from pypulseq_matlab_like.opts import Opts
 from pypulseq_matlab_like.sigpy_pulse_opts import SigpyPulseOpts
 from pypulseq_matlab_like.supported_labels_rf_use import get_supported_rf_uses
 from pypulseq_matlab_like.utils.tracing import trace, trace_enabled
+
+
+def _load_sigpy_rf():
+    """Import SigPy RF functionality only when a SigPy-backed design needs it."""
+    try:
+        import sigpy.mri.rf as rf
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError(
+            "SigPy is not installed. Install it using 'pip install sigpy' or "
+            "'pip install pypulseq[sigpy]'."
+        ) from err
+    return rf
+
+
+def _load_sigpy_plot():
+    """Import SigPy plotting only when diagnostic plots are requested."""
+    try:
+        import sigpy.plot as pl
+    except ModuleNotFoundError as err:
+        raise ModuleNotFoundError(
+            "SigPy is not installed. Install it using 'pip install sigpy' or "
+            "'pip install pypulseq[sigpy]'."
+        ) from err
+    return pl
 
 
 def _dzrf_ls_matlab_like(
@@ -403,6 +419,7 @@ def make_slr(
         #     cancel_alpha_phs=cancel_alpha_phs,
         # )
     else:
+        rf = _load_sigpy_rf()
         pulse = rf.slr.dzrf(
             n=n_samples,
             tb=time_bw_product,
@@ -416,6 +433,8 @@ def make_slr(
     signal = pulse * flip_angle / flip
 
     if disp:
+        rf = _load_sigpy_rf()
+        pl = _load_sigpy_plot()
         pl.LinePlot(pulse)
         pl.LinePlot(signal)
 
@@ -458,6 +477,7 @@ def make_sms(
     band_sep = pulse_cfg.band_sep
     phs_0_pt = pulse_cfg.phs_0_pt
 
+    rf = _load_sigpy_rf()
     if str(ftype).strip().lower() == 'ls':
         pulse_in = _dzrf_ls_matlab_like(
             n=n_samples,
@@ -493,6 +513,7 @@ def make_sms(
     signal = pulse * flip_angle / flip
 
     if disp:
+        pl = _load_sigpy_plot()
         pl.LinePlot(pulse_in)
         pl.LinePlot(pulse)
         pl.LinePlot(signal)
