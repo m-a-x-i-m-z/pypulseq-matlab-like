@@ -482,7 +482,7 @@ def read(self, path: str, detect_rf_use: Union[bool, None] = None, remove_duplic
             # Clear block cache for all blocks that contain the modified RF event
             for block_counter, events in self.block_events.items():
                 if events[1] == k:
-                    del self.block_cache[block_counter]
+                    self.block_cache.discard(block_counter)
 
     # When removing duplicates, remove and remap events in the sequence without
     # creating a copy.

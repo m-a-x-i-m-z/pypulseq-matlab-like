@@ -31,6 +31,7 @@ from pypulseq_matlab_like.Sequence.calc_grad_spectrum import calculate_gradient_
 from pypulseq_matlab_like.Sequence.calc_moments_b_tensor import calc_moments_b_tensor
 from pypulseq_matlab_like.Sequence.calc_pns import calc_pns
 from pypulseq_matlab_like.Sequence.ext_test_report import ext_test_report_str, ext_test_report_data
+from pypulseq_matlab_like.Sequence.caches import BlockCache, EventRegistrationCache
 from pypulseq_matlab_like.Sequence.install import detect_scanner
 from pypulseq_matlab_like.Sequence.read_binary import read_binary
 from pypulseq_matlab_like.Sequence.read_seq import read
@@ -59,7 +60,24 @@ class Sequence:
     version_minor = int(minor)
     version_revision = revision
 
-    def __init__(self, system: Union[Opts, None] = None, use_block_cache: bool = True):
+    def __init__(
+        self,
+        system: Union[Opts, None] = None,
+        use_block_cache: bool = False,
+        use_event_cache: bool = False,
+    ):
+        """Initialize a Pulseq sequence.
+
+        Parameters
+        ----------
+        system : Opts or None, optional
+            Scanner hardware limits.
+        use_block_cache : bool, default=False
+            Cache decompressed blocks returned by :meth:`get_block`.
+        use_event_cache : bool, default=False
+            Cache event registration results within this Sequence. Disabling
+            it uses the original uncached registration path.
+        """
         if system is None:
             system = Opts()
         if not hasattr(system, 'flag_trid') or getattr(system, 'flag_trid') is None:
@@ -89,8 +107,8 @@ class Sequence:
 
         self.block_events = OrderedDict()
         self.block_trace = OrderedDict()
-        self.use_block_cache = use_block_cache
-        self.block_cache = {}
+        self.block_cache = BlockCache(enabled=use_block_cache)
+        self._event_cache = EventRegistrationCache(enabled=use_event_cache)
         self.next_free_block_ID = 1
         self.definitions = {}
 
@@ -134,6 +152,56 @@ class Sequence:
         s += '\ngrad_raster_time: ' + str(self.grad_raster_time)
         s += '\nblock_events: ' + str(len(self.block_events))
         return s
+
+    def __enter__(self) -> 'Sequence':
+        """Return this Sequence for an optional cache-scoped context."""
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback) -> bool:
+        """Release derived cache state at the context boundary."""
+        self.clear_caches()
+        return False
+
+    @property
+    def use_block_cache(self) -> bool:
+        """Whether decompressed-block caching is enabled."""
+        return self.block_cache.enabled
+
+    @use_block_cache.setter
+    def use_block_cache(self, enabled: bool) -> None:
+        self.block_cache.enabled = enabled
+
+    @property
+    def use_event_cache(self) -> bool:
+        """Whether event-registration caching is enabled."""
+        return self._event_cache.enabled
+
+    @use_event_cache.setter
+    def use_event_cache(self, enabled: bool) -> None:
+        self._event_cache.enabled = enabled
+
+    @property
+    def block_cache_size(self) -> int:
+        """Number of canonical decompressed blocks held by the block cache."""
+        return len(self.block_cache)
+
+    @property
+    def event_cache_size(self) -> int:
+        """Number of event objects retained by the registration cache."""
+        return len(self._event_cache)
+
+    def clear_event_cache(self) -> None:
+        """Discard derived event-registration results without changing sequence data."""
+        self._event_cache.clear()
+
+    def clear_block_cache(self) -> None:
+        """Discard decompressed blocks without changing sequence data."""
+        self.block_cache.clear()
+
+    def clear_caches(self) -> None:
+        """Discard both independent Sequence acceleration caches."""
+        self.clear_event_cache()
+        self.clear_block_cache()
 
     def copy_definitions(self, other_seq) -> None:
         self.definitions = other_seq.definitions
@@ -1460,6 +1528,11 @@ class Sequence:
         if len(np.intersect1d(selected_events, other_events)) > 0:
             raise RuntimeError('mod_grad_axis does not yet support the same gradient event used on multiple axes.')
 
+        # This operation mutates library entries in place. Cached blocks contain
+        # the old decompressed gradients, and cached event registrations may map
+        # an unchanged caller event to an ID whose library contents were scaled.
+        self.clear_caches()
+
         for i in range(len(selected_events)):
             event_id = selected_events[i]
             old_data = self.grad_library.data[event_id]
@@ -1478,10 +1551,6 @@ class Sequence:
             # Use EventLibrary.update() to properly maintain keymap integrity
             new_data = tuple(grad_data)
             self.grad_library.update(event_id, old_data, new_data, grad_type)
-
-        # Clear block cache to ensure get_block() uses the modified gradient data
-        if self.use_block_cache:
-            self.block_cache.clear()
 
     def paper_plot(
         self,
@@ -1586,13 +1655,24 @@ class Sequence:
         remove_duplicates : bool, default=True
             Remove duplicate events from the sequence after reading.
         """
-        if self.use_block_cache:
-            self.block_cache.clear()
+        # Reading replaces all event libraries, invalidating every registration
+        # ID cached for the previous contents.
+        self.clear_caches()
 
         read(self, path=file_path, detect_rf_use=detect_rf_use, remove_duplicates=remove_duplicates)
 
         # Initialize next free block ID
         self.next_free_block_ID = (max(self.block_events) + 1) if self.block_events else 1
+
+    def read_binary(self, filename: str) -> None:
+        """Read a binary sequence after discarding stale registration results."""
+        self.clear_event_cache()
+        read_binary(self, filename)
+
+    def write_binary(self, filename: str, create_signature: bool = True) -> Union[str, None]:
+        """Write a binary sequence and end the current registration-cache scope."""
+        self.clear_event_cache()
+        return write_binary(self, filename, create_signature=create_signature)
 
     def register_adc_event(self, event: EventLibrary) -> int:
         return block.register_adc_event(self, event)
@@ -1682,13 +1762,14 @@ class Sequence:
             sequence.
         """
         if in_place:
+            # IDs may be remapped below, so no existing registration result
+            # or decompressed block remains valid.
+            self.clear_caches()
             seq_copy = self
         else:
-            # Avoid copying block_cache for performance
-            tmp = self.block_cache
-            self.block_cache = {}
+            # Both cache classes deliberately deepcopy to empty caches because
+            # their entries are derived state tied to the original Sequence.
             seq_copy = deepcopy(self)
-            self.block_cache = tmp
 
         # Find duplicate in shape library
         seq_copy.shape_library, mapping = seq_copy.shape_library.remove_duplicates(9)
@@ -1742,6 +1823,7 @@ class Sequence:
         for block_id in seq_copy.block_events:
             seq_copy.block_events[block_id][5] = mapping[seq_copy.block_events[block_id][5]]
 
+        seq_copy.clear_caches()
         return seq_copy
 
     def rf_from_lib_data(self, lib_data: list, use: str = '') -> SimpleNamespace:
@@ -2052,6 +2134,7 @@ class Sequence:
                         )
 
                     self.block_durations[block_counters] = new_dur
+                    self.block_cache.discard(block_counters)
 
         # Now check if there are some input soft delays which haven't been found in the sequence
         all_input_hints = kwargs.keys()
@@ -2596,6 +2679,11 @@ class Sequence:
         deduplicated sequences signature, and not the Sequence that is stored in the Sequence object.
         """
 
+        # Writing is an explicit construction boundary. The compressed
+        # libraries are already complete, so registration entries are no
+        # longer needed and must not leak into a later construction phase.
+        self.clear_event_cache()
+
         if check_timing:
             is_ok, error_report = self.check_timing()
             if not is_ok:
@@ -2672,5 +2760,3 @@ class Sequence:
 
 Sequence.calc_moments_b_tensor = calc_moments_b_tensor
 Sequence.auto_label = auto_label
-Sequence.read_binary = read_binary
-Sequence.write_binary = write_binary

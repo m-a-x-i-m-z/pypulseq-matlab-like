@@ -91,6 +91,26 @@ Getting started with pulse sequence design using `PyPulseq` is simple:
     seq = pp.Sequence(system=system)
     ```
 
+    `Sequence` provides two independent, opt-in acceleration caches. Both are
+    disabled by default so normal construction follows the uncached MATLAB
+    execution path. The event cache avoids repeating event-library
+    registration, while the block cache avoids repeating block decompression
+    and still returns independent values on every `get_block()` call. Enable
+    either cache explicitly when its workload benefits from it:
+
+    ```python
+    seq = pp.Sequence(
+        system=system,
+        use_event_cache=True,
+        use_block_cache=True,
+    )
+    ```
+
+    The modes can also be changed independently through
+    `seq.use_event_cache` and `seq.use_block_cache`. Use
+    `seq.clear_event_cache()`, `seq.clear_block_cache()`, or
+    `seq.clear_caches()` at an explicit application lifecycle boundary.
+
 2. Then, design gradient, RF or ADC pulse sequence events:
 
     ```python

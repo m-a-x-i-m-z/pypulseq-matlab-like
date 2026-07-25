@@ -12,6 +12,7 @@ from pypulseq_matlab_like.block_to_events import block_to_events
 from pypulseq_matlab_like.compress_shape import compress_shape
 from pypulseq_matlab_like.decompress_shape import decompress_shape
 from pypulseq_matlab_like.event_lib import EventLibrary
+from pypulseq_matlab_like.Sequence.caches import make_registration_key
 from pypulseq_matlab_like.supported_labels_rf_use import get_supported_labels
 from pypulseq_matlab_like.utils.tracing import trace_enabled
 
@@ -48,6 +49,11 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
         If a soft delay extension is used in a block of zero duration.
         If a soft delay extension is used in a block containing conventional events.
     """
+    # A replacement at this index invalidates its decompressed representation.
+    # Clear before validation as a failed replacement may still have inserted
+    # library data, while the existing block remains safe to decompress again.
+    self.block_cache.discard(block_index)
+
     events = block_to_events(*args)
     new_block = np.zeros(7, dtype=np.int32)
     duration = 0.0
@@ -57,43 +63,15 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
 
     check_g = [None, None, None]
     extensions = []
-    sequence_id = id(self)
 
     def get_cached_registration(event: SimpleNamespace, cache_key=None):
-        cache = getattr(event, '_pypulseq_sequence_event_cache', None)
-        if cache is None:
+        if not self.use_event_cache:
             return None
-
-        seq_cache = cache.get(sequence_id)
-        if seq_cache is None:
-            return None
-
-        key = cache_key if cache_key is not None else ('__default__',)
-        return seq_cache.get(key)
+        return self._event_cache.get(event, cache_key)
 
     def set_cached_registration(event: SimpleNamespace, cache_key=None, **values) -> None:
-        cache = getattr(event, '_pypulseq_sequence_event_cache', None)
-        if cache is None:
-            cache = {}
-            setattr(event, '_pypulseq_sequence_event_cache', cache)
-        seq_cache = cache.setdefault(sequence_id, {})
-        key = cache_key if cache_key is not None else ('__default__',)
-        seq_cache[key] = values
-
-    def cache_value(value):
-        if isinstance(value, np.ndarray):
-            value = np.ascontiguousarray(value)
-            return (str(value.dtype), value.shape, value.tobytes())
-        if isinstance(value, np.generic):
-            value = value.item()
-        if isinstance(value, float):
-            return ('float', value.hex())
-        if isinstance(value, (list, tuple)):
-            return tuple(cache_value(item) for item in value)
-        return value
-
-    def event_cache_key(event: SimpleNamespace, *field_names):
-        return tuple((field_name, cache_value(getattr(event, field_name, None))) for field_name in field_names)
+        if self.use_event_cache:
+            self._event_cache.put(event, cache_key, **values)
 
     for event in events:
         if isinstance(event, str):
@@ -116,24 +94,33 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
             if new_block[1] != 0:
                 raise ValueError('Multiple RF events were specified in set_block')
 
-            cache_key = event_cache_key(
-                event,
-                'signal',
-                't',
-                'center',
-                'delay',
-                'freq_ppm',
-                'phase_ppm',
-                'freq_offset',
-                'phase_offset',
-                'use',
-            )
-            cache = get_cached_registration(event, cache_key)
-            if cache is not None and 'id' in cache:
-                rf_id = cache['id']
+            if hasattr(event, 'id'):
+                rf_id = event.id
             else:
-                rf_id, shape_IDs = register_rf_event(self, event)
-                set_cached_registration(event, cache_key, id=rf_id, shape_IDs=shape_IDs)
+                cache_key = (
+                    make_registration_key(
+                        event,
+                        'signal',
+                        't',
+                        'center',
+                        'delay',
+                        'freq_ppm',
+                        'phase_ppm',
+                        'freq_offset',
+                        'phase_offset',
+                        'use',
+                        'shape_IDs',
+                        'name',
+                    )
+                    if self.use_event_cache
+                    else None
+                )
+                cache = get_cached_registration(event, cache_key)
+                if cache is not None and 'id' in cache:
+                    rf_id = cache['id']
+                else:
+                    rf_id, shape_IDs = register_rf_event(self, event)
+                    set_cached_registration(event, cache_key, id=rf_id, shape_IDs=shape_IDs)
 
             new_block[1] = rf_id
             duration = max(duration, event.shape_dur + event.delay + event.ringdown_time)
@@ -154,20 +141,29 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
 
             check_g[channel_num] = SimpleNamespace(idx=idx, start=(grad_start, event.first), stop=(grad_duration, event.last))
 
-            cache_key = event_cache_key(
-                event,
-                'waveform',
-                'tt',
-                'first',
-                'last',
-                'delay',
-            )
-            cache = get_cached_registration(event, cache_key)
-            if cache is not None and 'id' in cache:
-                grad_id = cache['id']
+            if hasattr(event, 'id'):
+                grad_id = event.id
             else:
-                grad_id, shape_IDs = register_grad_event(self, event)
-                set_cached_registration(event, cache_key, id=grad_id, shape_IDs=shape_IDs)
+                cache_key = (
+                    make_registration_key(
+                        event,
+                        'waveform',
+                        'tt',
+                        'first',
+                        'last',
+                        'delay',
+                        'shape_IDs',
+                        'name',
+                    )
+                    if self.use_event_cache
+                    else None
+                )
+                cache = get_cached_registration(event, cache_key)
+                if cache is not None and 'id' in cache:
+                    grad_id = cache['id']
+                else:
+                    grad_id, shape_IDs = register_grad_event(self, event)
+                    set_cached_registration(event, cache_key, id=grad_id, shape_IDs=shape_IDs)
 
             new_block[idx] = grad_id
             duration = max(duration, grad_duration)
@@ -183,20 +179,27 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
                     f'Trying to add more than one gradient per axis on axis {event.channel} in block {block_index}'
                 )
 
-            cache_key = event_cache_key(
-                event,
-                'amplitude',
-                'rise_time',
-                'flat_time',
-                'fall_time',
-                'delay',
-            )
-            cache = get_cached_registration(event, cache_key)
-            if cache is not None and 'id' in cache:
-                trap_id = cache['id']
+            if hasattr(event, 'id'):
+                trap_id = event.id
             else:
-                trap_id = register_grad_event(self, event)
-                set_cached_registration(event, cache_key, id=trap_id)
+                cache_key = (
+                    make_registration_key(
+                        event,
+                        'amplitude',
+                        'rise_time',
+                        'flat_time',
+                        'fall_time',
+                        'delay',
+                    )
+                    if self.use_event_cache
+                    else None
+                )
+                cache = get_cached_registration(event, cache_key)
+                if cache is not None and 'id' in cache:
+                    trap_id = cache['id']
+                else:
+                    trap_id = register_grad_event(self, event)
+                    set_cached_registration(event, cache_key, id=trap_id)
 
             new_block[idx] = trap_id
             duration = max(duration, event.delay + event.rise_time + event.flat_time + event.fall_time)
@@ -207,24 +210,33 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
             if new_block[5] != 0:
                 raise ValueError('Multiple ADC events were specified in set_block')
 
-            cache_key = event_cache_key(
-                event,
-                'num_samples',
-                'dwell',
-                'delay',
-                'dead_time',
-                'freq_ppm',
-                'phase_ppm',
-                'freq_offset',
-                'phase_offset',
-                'phase_modulation',
-            )
-            cache = get_cached_registration(event, cache_key)
-            if cache is not None and 'id' in cache:
-                adc_id = cache['id']
+            if hasattr(event, 'id'):
+                adc_id = event.id
             else:
-                adc_id, shape_id = register_adc_event(self, event)
-                set_cached_registration(event, cache_key, id=adc_id, shape_id=shape_id)
+                cache_key = (
+                    make_registration_key(
+                        event,
+                        'num_samples',
+                        'dwell',
+                        'delay',
+                        'dead_time',
+                        'freq_ppm',
+                        'phase_ppm',
+                        'freq_offset',
+                        'phase_offset',
+                        'phase_modulation',
+                        'shape_id',
+                        'name',
+                    )
+                    if self.use_event_cache
+                    else None
+                )
+                cache = get_cached_registration(event, cache_key)
+                if cache is not None and 'id' in cache:
+                    adc_id = cache['id']
+                else:
+                    adc_id, shape_id = register_adc_event(self, event)
+                    set_cached_registration(event, cache_key, id=adc_id, shape_id=shape_id)
 
             new_block[5] = adc_id
             duration = max(duration, event.delay + event.num_samples * event.dwell + event.dead_time)
@@ -271,12 +283,17 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
             if hasattr(event, 'id'):
                 event_id = event.id
             else:
-                cache = get_cached_registration(event)
+                cache_key = (
+                    make_registration_key(event, 'rot_quaternion')
+                    if self.use_event_cache
+                    else None
+                )
+                cache = get_cached_registration(event, cache_key)
                 if cache is not None and 'id' in cache:
                     event_id = cache['id']
                 else:
                     event_id = self.register_rotation_event(event)
-                    set_cached_registration(event, id=event_id)
+                    set_cached_registration(event, cache_key, id=event_id)
 
             ext = {'type': self.get_extension_type_ID('ROTATIONS'), 'ref': event_id}
             extensions.append(ext)
@@ -757,6 +774,7 @@ def get_block(self, block_index: int, add_ids: bool = False) -> SimpleNamespace:
 
     # Enter block into the block cache
     if self.use_block_cache and not add_ids:
+        # BlockCache stores its own canonical snapshot and returns only copies.
         self.block_cache[block_index] = block
 
     return block
