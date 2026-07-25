@@ -55,7 +55,10 @@ class EventLibrary:
         """
         if self.numpy_data:
             data = np.asarray(new_data).ravel()
-            return ' '.join(f'{x:.6g}' if isinstance(x, numbers.Number) else str(x) for x in data)
+            return ' '.join(
+                f'{0.0 if x == 0 else x:.6g}' if isinstance(x, numbers.Number) else str(x)
+                for x in data
+            )
         return tuple(new_data)
 
     def __str__(self) -> str:
