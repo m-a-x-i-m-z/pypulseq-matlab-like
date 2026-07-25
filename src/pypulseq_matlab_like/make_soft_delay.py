@@ -99,12 +99,12 @@ def make_soft_delay(
     soft_delay = SimpleNamespace()
 
     # Validate hint parameter
+    if not isinstance(hint, str):
+        raise TypeError("Parameter 'hint' must be a string.")
     if not hint:
         raise ValueError("Parameter 'hint' cannot be empty.")
     if any(c.isspace() for c in hint):
         raise ValueError("Parameter 'hint' may not contain white space characters.")
-    if not isinstance(hint, str):
-        raise TypeError("Parameter 'hint' must be a string.")
 
     # Validate numeric parameters
     if default_duration <= 0:

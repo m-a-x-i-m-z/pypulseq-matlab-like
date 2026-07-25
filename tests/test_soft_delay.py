@@ -91,11 +91,11 @@ def test_soft_delay_validation():
         pp.make_soft_delay('T E', default_duration=5e-3)
 
     # Test non-string hint
-    with pytest.raises(TypeError, match="'int' object is not iterable"):
+    with pytest.raises(TypeError, match="Parameter 'hint' must be a string"):
         pp.make_soft_delay(123, default_duration=5e-3)
 
     # Test zero factor
-    with pytest.raises(ValueError, match="Parameter 'factor' cannot be zero"):
+    with pytest.raises(ValueError, match="Parameter 'factor' must be nonzero"):
         pp.make_soft_delay('TE', factor=0, default_duration=5e-3)
 
     # Test negative default_duration
@@ -174,20 +174,18 @@ def test_soft_delay_automatic_duration():
     assert seq.block_durations[2] == 150e-3, f'Expected block duration 150ms, got {seq.block_durations[2] * 1e3}ms'
 
 
-def test_raw_float_rejection():
-    """Test that raw float durations are rejected with helpful error message."""
+def test_raw_float_duration():
+    """Test that a raw float is accepted as an explicit block duration."""
     seq = pp.Sequence()
 
-    # Test that raw floats are rejected
-    with pytest.raises(
-        ValueError,
-        match=r'Raw float values are not allowed in add_block\(\)\. Use pp.make_delay\(0.001\) for delays\.',
-    ):
-        seq.add_block(1e-3)
+    # Match MATLAB setBlock(), which treats a numeric argument as the
+    # requested block duration.
+    seq.add_block(1e-3)
+    assert seq.block_durations[1] == 1e-3, 'Raw float duration should work'
 
-    # Test that the proper way still works
+    # An explicit delay event remains supported as well.
     seq.add_block(pp.make_delay(1e-3))
-    assert seq.block_durations[1] == 1e-3, 'make_delay should still work'
+    assert seq.block_durations[2] == 1e-3, 'make_delay should still work'
 
 
 def test_soft_delay_edge_cases():
@@ -205,7 +203,7 @@ def test_soft_delay_edge_cases():
     assert seq.block_durations[2] == 10.0, 'Large durations should work'
 
     # Test zero factor (should be rejected)
-    with pytest.raises(ValueError, match="Parameter 'factor' cannot be zero"):
+    with pytest.raises(ValueError, match="Parameter 'factor' must be nonzero"):
         pp.make_soft_delay('ZERO_FACTOR', factor=0.0, default_duration=1e-3)
 
     # Test negative factor (should work)
@@ -349,7 +347,7 @@ def test_soft_delay_sequence_integration():
     seq = pp.Sequence()
 
     # Create a sequence with mixed events
-    rf_pulse = pp.make_block_pulse(flip_angle=1.57, duration=1e-3)  # π/2 pulse
+    rf_pulse = pp.make_block_pulse(flip_angle=1.57, duration=1e-3, use='excitation')  # π/2 pulse
     grad_x = pp.make_trapezoid('x', area=1000)
     adc_event = pp.make_adc(num_samples=100, duration=5e-3)
     te_delay = pp.make_soft_delay('TE', default_duration=10e-3)
