@@ -1,20 +1,16 @@
-<p align="center">
-
-![PyPulseq](logo_transparent.png)
-
-</p>
-
-<p align = "left">
+<div align="center">
+<a href="https://github.com/m-a-x-i-m-z/pypulseq-matlab-like" target="_blank">
+<img src="logo_transparent.png" width="250" alt="PyPulseqM logo"></img>
+</a>
+</div>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python](https://img.shields.io/badge/python-3.7--3.13-blue)](https://pypi.org/project/pypulseq/)
-[![FAIR checklist badge](https://fairsoftwarechecklist.net/badge.svg)](https://fairsoftwarechecklist.net/v0.2?f=31&a=32113&i=32322&r=133)
 
 </p>
 
-# PyPulseq-Matlab-like: An exprimental PyPython package strongly aligned to the Pulseq-Matlab version
+# PyPulseq-Matlab-like: An exprimental PyPython package strongly aligned to the Pulseq-Matlab version with some additional optimizations and improvements 
 
-This project was created to bridge the gap between the *original* Pulseq implementation in Matlab and its current Python counterpart. Currently it implements all v1.5.1 Pulseq features, mirror all test cases from the Matlab test suite and contains all demo sequences from the Matlab Pulseq repository. This project has a temporarily and experimental nature and serves a possible step towards achieving a better compatibility between two projects. The long term goal is to transition to PyPulseq fully.
+This project was created as one of the efforts to bridge the gap between the *original* Pulseq implementation in Matlab and its current Python counterpart. Currently it implements all v1.5.1 Pulseq features, mirror all test cases from the Matlab test suite and contains all demo sequences from the Matlab Pulseq repository. This project has a temporarily and experimental nature and serves a possible step towards achieving a better compatibility between two projects. The long term goal is to transition to PyPulseq fully.
 
 ## Table of contents
 
