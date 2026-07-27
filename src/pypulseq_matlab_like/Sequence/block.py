@@ -74,6 +74,9 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
             self._event_cache.put(event, cache_key, **values)
 
     for event in events:
+        if event is None:
+            continue # skip empty events
+
         if isinstance(event, str):
             if event == 'roundUpBlockDuration':
                 round_up_block_duration = True
@@ -448,6 +451,13 @@ def set_block(self, block_index: int, *args: Union[SimpleNamespace, float]) -> N
                 f'Required block duration is {required_duration:g} s but actual block duration is {duration:g} s'
             )
         duration = required_duration
+
+    # MZ: skip adding completely empty blocks; if overwrting a previous block with a new empty block, remove the previous block from the sequence
+    if duration == 0 and new_block[1:6].sum() == 0 and new_block[6] == 0:   
+        if block_index in self.block_events:
+            del self.block_events[block_index]
+            del self.block_durations[block_index]
+        return
 
     self.block_events[block_index] = new_block
     self.block_durations[block_index] = float(duration)
