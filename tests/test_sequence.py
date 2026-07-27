@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 import pypulseq_matlab_like as pp
 import pytest
 from _pytest.python_api import ApproxBase
@@ -110,15 +111,15 @@ def seq_make_sinc_pulses():
     seq.add_block(pp.make_delay(1))
     seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, use='excitation'))
     seq.add_block(pp.make_delay(1))
-    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=1e-3, use='excitation'))
+    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=2e-3, use='excitation'))
     seq.add_block(pp.make_delay(1))
     seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=2e-3, phase_offset=math.pi / 2, use='excitation'))
     seq.add_block(pp.make_delay(1))
-    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=1e-3, phase_offset=math.pi / 2, freq_offset=1e3, use='excitation'))
+    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=2e-3, phase_offset=math.pi / 2, freq_offset=1e3, use='excitation'))
     seq.add_block(pp.make_delay(1))
-    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=1e-3, time_bw_product=1, use='excitation'))
+    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=2e-3, time_bw_product=1, use='excitation'))
     seq.add_block(pp.make_delay(1))
-    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=1e-3, apodization=0.1, use='excitation'))
+    seq.add_block(pp.make_sinc_pulse(flip_angle=math.pi / 2, duration=2e-3, apodization=0.1, use='excitation'))
 
     return seq
 
