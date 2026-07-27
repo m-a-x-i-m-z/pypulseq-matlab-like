@@ -90,7 +90,7 @@ def test_soft_delay_validation():
         pp.make_soft_delay('T E', default_duration=5e-3)
 
     # Test non-string hint
-    with pytest.raises(TypeError, match="'int' object is not iterable"):
+    with pytest.raises(TypeError, match="Parameter 'hint' must be a string."):
         pp.make_soft_delay(123, default_duration=5e-3)
 
     # Test zero factor
