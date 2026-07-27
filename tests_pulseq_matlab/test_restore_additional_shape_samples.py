@@ -1,6 +1,12 @@
 import pytest
 
 import numpy as np
+
+## Add pypulseq source to path (for debugging)
+#import sys
+#import os
+#sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 import pypulseq_matlab_like as pp
 
 
@@ -21,7 +27,7 @@ class TestRestoreAdditionalShapeSamples:
         count = 10
         waveform = np.linspace(1000, 10000, count)
         times = (np.arange(1, count + 1) - 0.5) * system.grad_raster_time
-        times_changed, waveform_changed = pp.restore_additional_shape_samples(times, waveform, 500, 11000, system.grad_raster_time, 1)
+        times_changed, waveform_changed = pp.restore_additional_shape_samples(times, waveform, 500, 10500, system.grad_raster_time, 1)
         assert np.all(np.isfinite(waveform_changed))
         assert np.all(np.isfinite(times_changed))
         assert np.all(np.diff(times_changed) >= 0)

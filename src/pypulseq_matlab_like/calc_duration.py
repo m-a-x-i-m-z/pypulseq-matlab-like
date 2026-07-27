@@ -14,6 +14,11 @@ def calc_duration(*args: SimpleNamespace) -> float:
     Although it is possible to provide events that can't be actually be combined into a block
     (e.g. multiple events of the same type), the result is still the maximum duration of all events.
 
+    `None` inputs are ignored, which allows optional events to be passed without an explicit
+    conditional.
+
+    If no non-None inputs are provided, returns 0.0.
+
     Parameters
     ----------
     args : SimpleNamespace
@@ -26,8 +31,10 @@ def calc_duration(*args: SimpleNamespace) -> float:
     """
     events = block_to_events(*args)
 
-    duration = 0
+    duration = 0.0
     for event in events:
+        if event is None:
+            continue
         if isinstance(event, (float, int)):  # block_duration field
             assert duration <= event
             duration = event

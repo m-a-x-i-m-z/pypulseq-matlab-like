@@ -109,6 +109,8 @@ def make_extended_trapezoid(
             max_slew=max_slew,
             max_grad=max_grad,
             delay=times[0],
+            first=amplitudes[0] if times[0] == 0 else 0,
+            last=amplitudes[-1]
         )
     else:
         #  Keep the original possibly irregular sampling

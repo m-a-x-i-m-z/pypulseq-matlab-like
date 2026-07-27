@@ -106,5 +106,5 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 seq.write(output_path)
 
 # seq.plot()
-# rep = seq.test_report()
-# print(rep)
+rep = seq.test_report()
+print(rep)

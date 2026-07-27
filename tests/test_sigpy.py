@@ -3,6 +3,12 @@
 import importlib.util
 
 import numpy as np
+
+# Add pypulseq source to path (for debugging)
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 import pypulseq_matlab_like as pp
 import pytest
 from pypulseq_matlab_like.opts import Opts
@@ -59,6 +65,7 @@ def test_slr():
         time_bw_product=time_bw_product,
         pulse_cfg=pulse_cfg,
         plot=False,
+        use='excitation'
     )
 
     # Check that the number of samples in the pulse is correct
@@ -77,7 +84,7 @@ def test_slr():
     )
     mag_xy = 2 * np.multiply(np.conj(a), b)
     plateau_widths = np.sum(np.abs(mag_xy) > 0.8)
-    assert plateau_widths == 29
+    assert plateau_widths == 29 # MZ: interesting, why it is required to be so?
 
 
 @pytest.mark.sigpy
@@ -122,6 +129,7 @@ def test_sms():
         time_bw_product=time_bw_product,
         pulse_cfg=pulse_cfg,
         plot=False,
+        use='excitation'
     )
 
     # Check that the number of samples in the pulse is correct
@@ -141,4 +149,4 @@ def test_sms():
     mag_xy = 2 * np.multiply(np.conj(a), b)
     plateau_widths = np.sum(np.abs(mag_xy) > 0.8)
     # if slr has 29 > 0.8, then sms with MB = n_bands
-    assert (29 * n_bands) == plateau_widths
+    assert (29 * n_bands) == plateau_widths # MZ: interesting, why it is required to be so?

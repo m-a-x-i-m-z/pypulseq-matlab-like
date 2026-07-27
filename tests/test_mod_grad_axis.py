@@ -3,6 +3,7 @@ Test functions for the mod_grad_axis method in pypulseq.Sequence.
 """
 
 import numpy as np
+
 import pypulseq_matlab_like as pp
 import pytest
 
@@ -61,7 +62,7 @@ def test_mod_grad_axis_arbitrary_gradient_scaling():
 
     # Store original values
     original_amplitude = gx.waveform.max()
-    original_area = np.trapezoid(gx.waveform, gx.tt)
+    original_area = np.trapz(gx.waveform, gx.tt)
     original_first = gx.first
     original_last = gx.last
 
@@ -76,7 +77,7 @@ def test_mod_grad_axis_arbitrary_gradient_scaling():
     assert abs(modified_gx.waveform.max() - 3 * original_amplitude) < 1e-10, 'Waveform amplitude should scale by factor'
 
     # Check area scaling
-    modified_area = np.trapezoid(modified_gx.waveform, modified_gx.tt)
+    modified_area = np.trapz(modified_gx.waveform, modified_gx.tt)
     assert abs(modified_area - 3 * original_area) < 1e-10, 'Waveform area should scale by factor'
 
     # Check first and last values scaling
@@ -138,7 +139,7 @@ def test_mod_grad_axis_consistency_scaling(factor):
     orig_gx_amp = block_orig.gx.amplitude
     orig_gx_area = block_orig.gx.area
     orig_gy_waveform = block_orig.gy.waveform.copy()
-    orig_gy_area = np.trapezoid(block_orig.gy.waveform, block_orig.gy.tt)
+    orig_gy_area = np.trapz(block_orig.gy.waveform, block_orig.gy.tt)
     orig_gz_amp = block_orig.gz.amplitude
     orig_gz_area = block_orig.gz.area
 
@@ -170,7 +171,7 @@ def test_mod_grad_axis_consistency_scaling(factor):
         err_msg=f'Y waveform not restored after factor {factor}',
     )
 
-    final_gy_area = np.trapezoid(block_final.gy.waveform, block_final.gy.tt)
+    final_gy_area = np.trapz(block_final.gy.waveform, block_final.gy.tt)
     assert abs(final_gy_area - orig_gy_area) < 1e-10, f'Y area not restored after factor {factor}'
 
 

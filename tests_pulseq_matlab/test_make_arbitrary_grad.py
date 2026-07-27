@@ -19,9 +19,10 @@ class TestMakeArbitraryGrad:
         assert_equal(gradient.first, 0, abs_tol=1e-10)
         assert_equal(gradient.last, 0, abs_tol=1e-10)
 
-    def test_no_first_last_warnings(self):
-        gradient = pp.make_arbitrary_grad('z', np.array([0, 5000, 10000, 5000, 0]), system=pp.Opts())
-        assert gradient.type == 'grad'
+    def test_first_last_warnings(self):
+        with pytest.raises(UserWarning): 
+            gradient = pp.make_arbitrary_grad('z', np.array([0, 5000, 10000, 5000, 0]), system=pp.Opts())
+            assert gradient.type == 'grad'
 
     def test_maxGrad_violation(self):
         system = pp.Opts()

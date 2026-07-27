@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
+# Add pypulseq source to path (for debugging)
+#import sys
+#import os
+#sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+
 from pypulseq_matlab_like.utils.siemens.readasc import readasc
 
 
@@ -61,22 +67,23 @@ def test_readasc_splits_asc_and_extra_at_asconv_end(tmp_path: Path):
     assert extra['post'] == 2
 
 
-def test_readasc_raises_on_unparsed_assignment_line(tmp_path: Path):
-    asc_file = tmp_path / 'test.asc'
-
-    _write_text(
-        asc_file,
-        '\n'.join(
-            [
-                'bad = 1.2.3',  # contains '=' but does not match numeric regex
-            ]
-        )
-        + '\n',
-    )
-
-    with pytest.raises(RuntimeError, match='ASC line with an assignment was not parsed correctly'):
-        readasc(str(asc_file))
-
+# Matlab's code tolerates such inputs and quietly converts them to strings
+# def test_readasc_raises_on_unparsed_assignment_line(tmp_path: Path):
+#    asc_file = tmp_path / 'test.asc'
+#
+#    _write_text(
+#        asc_file,
+#        '\n'.join(
+#            [
+#                'bad = 1.2.3',  # contains '=' but does not match numeric regex
+#            ]
+#        )
+#        + '\n',
+#    )
+#
+#    with pytest.raises(RuntimeError, match='ASC line with an assignment was not parsed correctly'):
+#        readasc(str(asc_file))
+#
 
 def test_readasc_raises_on_missing_file(tmp_path: Path):
     missing_file = tmp_path / 'does_not_exist.asc'

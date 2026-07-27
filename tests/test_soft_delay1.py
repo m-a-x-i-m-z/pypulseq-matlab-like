@@ -1,9 +1,10 @@
 """
 Tests for soft delay functionality including numID auto-assignment and validation.
 """
-import pytest
 
 import pypulseq_matlab_like as pp
+import pytest
+
 
 def test_soft_delay_numid_auto_assignment():
     """Test automatic numID assignment for soft delays."""
@@ -49,13 +50,13 @@ def test_soft_delay_numid_conflicts():
     seq.add_block(te_delay1)  # Gets numID 0
 
     # Test 1: Try to use different numID for same hint
-    te_delay2 = pp.make_soft_delay('TE', numID=1, default_duration=5e-3)
     with pytest.raises(ValueError, match="Soft delay hint 'TE' is already assigned to numID 0"):
+        te_delay2 = pp.make_soft_delay('TE', numID=1, default_duration=5e-3)
         seq.add_block(te_delay2)
 
     # Test 2: Try to reuse numID for different hint
-    tr_delay = pp.make_soft_delay('TR', numID=0, default_duration=100e-3)
     with pytest.raises(ValueError, match="numID 0 is already used by soft delay 'TE'"):
+        tr_delay = pp.make_soft_delay('TR', numID=0, default_duration=100e-3)
         seq.add_block(tr_delay)
 
 
@@ -90,7 +91,7 @@ def test_soft_delay_validation():
         pp.make_soft_delay('T E', default_duration=5e-3)
 
     # Test non-string hint
-    with pytest.raises(TypeError, match="'int' object is not iterable"):
+    with pytest.raises(TypeError, match="Parameter 'hint' must be a string"):
         pp.make_soft_delay(123, default_duration=5e-3)
 
     # Test zero factor
@@ -173,22 +174,16 @@ def test_soft_delay_automatic_duration():
     assert seq.block_durations[2] == 150e-3, f'Expected block duration 150ms, got {seq.block_durations[2] * 1e3}ms'
 
 
-def test_raw_float_and_conventional_delay():
-    """Test that raw float required durations work and that conventional make_delay still works."""
+def test_raw_float_duration():
+    """Test that a raw float is accepted as an explicit block duration."""
     seq = pp.Sequence()
 
-    ## Test that raw floats are rejected
-    #with pytest.raises(
-    #    ValueError,
-    #    match=r'Raw float values are not allowed in add_block\(\)\. Use pp.make_delay\(0.001\) for delays\.',
-    #):
-    #    seq.add_block(1e-3)
+    # Match MATLAB setBlock(), which treats a numeric argument as the
+    # requested block duration.
+    seq.add_block(1e-3)
+    assert seq.block_durations[1] == 1e-3, 'Raw float duration should work'
 
-    # Test that raw floats are not rejected
-    seq.add_block(2e-3)
-    assert seq.block_durations[1] == 2e-3, 'Raw floats should be allowed as required block durations'
-
-    # Test that the old way still works
+    # An explicit delay event remains supported as well.
     seq.add_block(pp.make_delay(1e-3))
     assert seq.block_durations[2] == 1e-3, 'make_delay should still work'
 
