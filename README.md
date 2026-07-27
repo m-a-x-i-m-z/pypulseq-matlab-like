@@ -1,6 +1,6 @@
 <div align="center">
 <a href="https://github.com/m-a-x-i-m-z/pypulseq-matlab-like" target="_blank">
-<img src="logo_transparent.png" width="320" alt="PyPulseqM logo"></img>
+<img src="logo_transparent.png" width="360" alt="PyPulseqM logo"></img>
 </a>
 </div>
 
