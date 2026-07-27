@@ -87,10 +87,10 @@ def _trap(channel, area, duration=None):
 
 
 SEQUENCE_ZOO = {
-    'seq_make_gauss_pulses': seq_make_gauss_pulses,
-    'seq_make_sinc_pulses': seq_make_sinc_pulses,
-    'seq_make_block_pulses': seq_make_block_pulses,
-    'seq1': seq1, 'seq2': seq2, 'seq3': seq3, 'seq4': seq4,
+    'seq_make_gauss_pulses_m': seq_make_gauss_pulses,
+    'seq_make_sinc_pulses_m': seq_make_sinc_pulses,
+    'seq_make_block_pulses_m': seq_make_block_pulses,
+    'seq1_m': seq1, 'seq2_m': seq2, 'seq3_m': seq3, 'seq4_m': seq4,
 }
 
 
