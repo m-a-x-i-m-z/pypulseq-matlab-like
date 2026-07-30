@@ -33,7 +33,7 @@ def read_siemens_raw_data(filename):
     for mdb in twixtools.read_twix(filename)[-1]['mdb']:
         if mdb.is_image_scan():
             out.append(mdb.data)
-    return np.asarray(out).transpose(2,1,0)  # 3D numpy array [n_column, n_channel, acquisition_counter] -- like mapVBVD
+    return np.asarray(out) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
 
 # Read Siemens raw data in twix format
 def read_raw_data(filename):
@@ -444,7 +444,9 @@ def recon_cartesian_3d(kdata, seq, shape=None, use_labels=None):
 
 def reconstruct(kdata, seq, shape=None, use_labels=None, cartesian=None, is_3d=None, lambda_l2=0.01, lambda_tv=0, trajectory_delay=0):
     # reshape to the previous (Frank's) convention of [N_coils, N_meas, N_adc]
-    kdata = kdata.transpose(1,2,0)  # [N_coils, N_meas, N_adc]
+    kdata = kdata.transpose(1,0,2)  # [N_coils, N_meas, N_adc]
+    # Frank's reconstrruction is based in iFFT of the k-space data, so we need to conjugate the Siemens data
+    kdata = np.conj(kdata)
 
     # Autodetect of cartesian or 3D requires k-space trajectory
     if cartesian is None or is_3d is None:

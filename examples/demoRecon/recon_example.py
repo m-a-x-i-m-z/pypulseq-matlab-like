@@ -14,9 +14,9 @@ import os
 import h5py
 
 # directory to be scanned for data and sequence files
-#data_path = '/home/zaitsev/range_software/pulseq/IceNIH_RawSend/'; 
+data_path = '/home/zaitsev/range_software/pulseq/IceNIH_RawSend/'; 
 #data_path='/dev/shm/mr0mat/';
-data_path='/dev/shm/koma_mat/';
+#data_path='/dev/shm/koma_mat/';
 
 files = glob.glob(os.path.join(data_path, "*.seq"))
 files.sort(key=os.path.getmtime)
@@ -66,7 +66,7 @@ if os.path.exists(mat_file_path):
     if data_unsorted is not None:
         data_unsorted = np.squeeze(np.array(data_unsorted['real']) + 1j * np.array(data_unsorted['imag']))  # Convert to numpy complex array
         if np.ndim(data_unsorted) != 3:
-            data_unsorted=np.reshape(data_unsorted, (int(seq.adc_library.data[1][0]), 1, -1))  # todo: more correct detection rather than grabing the size of the first ADC event
+            data_unsorted=np.reshape(data_unsorted, (-1, 1, int(seq.adc_library.data[1][0])))  # todo: more correct detection rather than grabing the size of the first ADC event
         print(f'Loaded MATLAB file and restored dimensions: {data_unsorted.shape} ')
 
 # Otherwise load Siemens TWIX file
