@@ -24,6 +24,13 @@ except ImportError:
 
 import twixtools # use twixtools instead of mapvbvd
 
+try:
+    import ismrmrd
+    from ismrmrd.serialization import ProtocolDeserializer, ISMRMRDMessageID
+    ismrmrd_available = True
+except ImportError:
+    ismrmrd_available = False   
+
 import sigpy as sp
 from sigpy.mri.sim import birdcage_maps
 
@@ -34,6 +41,43 @@ def read_siemens_raw_data(filename):
         if mdb.is_image_scan():
             out.append(mdb.data)
     return np.asarray(out) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
+
+# read all data from an MRD / ISMRMRD file
+def read_mrd_data(filename):
+    if not ismrmrd_available:
+        raise RuntimeError('read_mrd_data called, but ismrmrd is not available. Run: !pip install ismrmrd')
+    if not os.path.isfile(filename):
+        print("%s is not a valid file" % filename)
+        raise SystemExit
+    out = list()
+    try:
+        print("Reading the MRD file: %s as a HDF5-file" % filename)
+        dset = ismrmrd.Dataset(filename, 'dataset', create_if_needed=False)
+        for acqnum in range(dset.number_of_acquisitions()):
+            acq = dset.read_acquisition(acqnum)
+            #if mdb.is_image_scan():
+            out.append(acq.data)
+        return np.asarray(out) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
+    except Exception as e:
+        print("Reading the MRD file: %s as an ISMRMRD-stream" % filename)
+
+    with ProtocolDeserializer(filename) as dset:
+        for obj in dset.deserialize():
+            if isinstance(obj, ismrmrd.Acquisition):
+                out.append(obj.data)
+    return np.asarray(out) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
+        # for obj in deser.deserialize():
+        # if isinstance(obj, ismrmrd.xsd.ismrmrdHeader):
+        #     header = obj
+        # elif isinstance(obj, ismrmrd.Acquisition):
+        #     acquisitions.append(obj)
+        # elif isinstance(obj, ismrmrd.Image):
+        #     pass   # handle reconstructed images
+        # elif isinstance(obj, ismrmrd.Waveform):
+        #     pass   # handle waveform data
+        # print(f"Got {len(acquisitions)} acquisitions")
+        # # Access k-space data:
+        # kspace = acquisitions[0].data   # numpy complex64 array, shape (channels, samples)
 
 # Read Siemens raw data in twix format
 def read_raw_data(filename):

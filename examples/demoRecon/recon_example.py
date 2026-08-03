@@ -7,7 +7,7 @@ import math
 import matplotlib.pyplot as plt
 import pypulseq as pp
 #import mapvbvd
-from recon_utils import reconstruct, read_raw_data, read_siemens_raw_data, plot_nd
+from recon_utils import reconstruct, read_raw_data, read_siemens_raw_data, read_mrd_data,plot_nd
 import glob
 import os
 
@@ -37,6 +37,7 @@ else:
     print('Sequence name is not defined in the sequence file.')
 
 mat_file_path = basic_filename + '.mat'  # try MATLAB file
+mrd_file_path = basic_filename + '.h5'  # try MRD / ISMRMRD file (both streaming and h5 files are supported)
 data_file_path = basic_filename + '.dat'  # try Siemens TWIX file
 
 # Try to load MATLAB .mat file first
@@ -68,6 +69,11 @@ if os.path.exists(mat_file_path):
         if np.ndim(data_unsorted) != 3:
             data_unsorted=np.reshape(data_unsorted, (-1, 1, int(seq.adc_library.data[1][0])))  # todo: more correct detection rather than grabing the size of the first ADC event
         print(f'Loaded MATLAB file and restored dimensions: {data_unsorted.shape} ')
+
+# Otherwise load MRD data file
+if data_unsorted is None:
+    print(f'Loading MRD data file \'{mrd_file_path}\'')
+    data_unsorted = read_mrd_data(mrd_file_path)  # 3D numpy array [n_column, n_channel, acquisition_counter]
 
 # Otherwise load Siemens TWIX file
 if data_unsorted is None:
