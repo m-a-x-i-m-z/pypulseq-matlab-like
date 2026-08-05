@@ -1,22 +1,33 @@
 # this script is based on the recon code / notebooks from the course "MR Physics with Pulseq" 
 import numpy as np
-import twixtools
 from scipy.io import loadmat
 
 import math
 import matplotlib.pyplot as plt
-import pypulseq as pp
-#import mapvbvd
-from recon_utils import reconstruct, read_raw_data, read_siemens_raw_data, read_mrd_data,plot_nd
+
 import glob
 import os
 
 import h5py
 
+#import mapvbvd
+import twixtools
+
+# Add pypulseq source to path (for debugging)
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
+
+import pypulseq_matlab_like as pp
+#import pypulseq
+
+from recon_utils import reconstruct, read_raw_data, read_siemens_raw_data, read_mrd_data,plot_nd
+
 # directory to be scanned for data and sequence files
-data_path = '/home/zaitsev/range_software/pulseq/IceNIH_RawSend/'; 
-#data_path='/dev/shm/mr0mat/';
-#data_path='/dev/shm/koma_mat/';
+data_path = '/home/zaitsev/range_software/pulseq/IceNIH_RawSend/'
+#data_path = 'C:/Users/zaitsev/pulseq_home/icenih_rawsend' 
+#data_path='/dev/shm/mr0mat/'
+#data_path='/dev/shm/koma_mat/'
 
 files = glob.glob(os.path.join(data_path, "*.seq"))
 files.sort(key=os.path.getmtime)
@@ -78,8 +89,18 @@ if data_unsorted is None:
 # Otherwise load Siemens TWIX file
 if data_unsorted is None:
     print(f'Loading raw data file \'{data_file_path}\'')
-    data_unsorted = read_siemens_raw_data(data_file_path)  # 3D numpy array [n_column, n_channel, acquisition_counter]
-
+    siemens_data = read_siemens_raw_data(data_file_path)
+    data_unsorted = siemens_data['data'] # 3D numpy array [n_column, n_channel, acquisition_counter]
+    if 'adc_phase_modulation' in siemens_data:
+        adc_phase_modulation = siemens_data['adc_phase_modulation'][10] # fixme: read ADC modulation IDs from the headers (once they are stored there)
+        print('applying ADC phase modulation')
+        data_cha_scan_col=np.transpose(data_unsorted,[1,0,2])
+        n_adc_seg = len(adc_phase_modulation) // data_cha_scan_col.shape[2]
+        data_cha_adc_col = np.reshape(data_cha_scan_col,[data_cha_scan_col.shape[0],data_cha_scan_col.shape[1]//n_adc_seg,n_adc_seg*data_cha_scan_col.shape[2]])
+        for cha in range(data_cha_adc_col.shape[0]):
+            for adc in range(data_cha_adc_col.shape[1]):
+                data_cha_adc_col[cha,adc,:]=data_cha_adc_col[cha,adc,:]*np.exp(1j*adc_phase_modulation)
+        data_unsorted=np.transpose(data_cha_adc_col,[1,0,2])
 rec = reconstruct(data_unsorted, seq)
 
 plot_nd(rec)

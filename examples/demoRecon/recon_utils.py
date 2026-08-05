@@ -36,19 +36,37 @@ from sigpy.mri.sim import birdcage_maps
 
 # read all image data from file
 def read_siemens_raw_data(filename):
-    out = list()
+    data = list()
+    adc_phase_modulation = dict()
     for mdb in twixtools.read_twix(filename)[-1]['mdb']:
         if mdb.is_image_scan():
-            out.append(mdb.data)
-    return np.asarray(out) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
+            data.append(mdb.data)
+        elif hasattr(mdb, 'data') and hasattr(mdb.data, 'hdr') and hasattr(mdb.data.hdr, 'id') and mdb.data.hdr.id.startswith(b'ShapeID:'):
+            ID = int(mdb.data.hdr.id[len('ShapeID:'):])
+            len_data = int(round(mdb.data.hdr.packet_size))
+            assert(len_data % 4 == 0)
+            float_vec = np.frombuffer(mdb.data.data, dtype='<f4')
+            #plt.plot(float_vec)
+            #plt.show()
+            assert(len(float_vec)==len_data // 4)
+            adc_phase_modulation[ID] = float_vec
+
+    out = dict( data=np.asarray(data)) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
+    if len(adc_phase_modulation) > 0:
+        out['adc_phase_modulation'] = adc_phase_modulation  
+    return out
 
 # read all data from an MRD / ISMRMRD file
 def read_mrd_data(filename):
     if not ismrmrd_available:
-        raise RuntimeError('read_mrd_data called, but ismrmrd is not available. Run: !pip install ismrmrd')
+        #raise Warning
+        print('read_mrd_data called, but ismrmrd is not available. Run: !pip install ismrmrd')
+        return None
     if not os.path.isfile(filename):
-        print("%s is not a valid file" % filename)
-        raise SystemExit
+        #raise Warning
+        print('read_mrd_data called, but file does not exist: %s' % filename)
+        return None
+
     out = list()
     try:
         print("Reading the MRD file: %s as a HDF5-file" % filename)
