@@ -37,10 +37,12 @@ from sigpy.mri.sim import birdcage_maps
 # read all image data from file
 def read_siemens_raw_data(filename):
     data = list()
+    mdh = list()
     adc_phase_modulation = dict()
     for mdb in twixtools.read_twix(filename)[-1]['mdb']:
         if mdb.is_image_scan():
             data.append(mdb.data)
+            mdh.append(mdb.mdh)
         elif hasattr(mdb, 'data') and hasattr(mdb.data, 'hdr') and hasattr(mdb.data.hdr, 'id') and mdb.data.hdr.id.startswith(b'ShapeID:'):
             ID = int(mdb.data.hdr.id[len('ShapeID:'):])
             len_data = int(round(mdb.data.hdr.packet_size))
@@ -54,6 +56,8 @@ def read_siemens_raw_data(filename):
     out = dict( data=np.asarray(data)) # 3D numpy array [acquisition_counter, n_channel, n_column] -- like mapVBVD in Matlab but in Python's convention (last dimension is the fastest changing one)
     if len(adc_phase_modulation) > 0:
         out['adc_phase_modulation'] = adc_phase_modulation  
+    if len(mdh) > 0:
+        out['mdh'] = mdh
     return out
 
 # read all data from an MRD / ISMRMRD file

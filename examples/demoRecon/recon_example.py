@@ -32,7 +32,7 @@ data_path = '/home/zaitsev/range_software/pulseq/IceNIH_RawSend/'
 files = glob.glob(os.path.join(data_path, "*.seq"))
 files.sort(key=os.path.getmtime)
 
-seq_file_path=files[-1]  # take the last modified sequence file
+seq_file_path=files[-1]  # -1 means take the last modified sequence file, -2 means second last
 
 basic_filename = os.path.splitext(seq_file_path)[0]  # remove the extension
 
@@ -92,14 +92,19 @@ if data_unsorted is None:
     siemens_data = read_siemens_raw_data(data_file_path)
     data_unsorted = siemens_data['data'] # 3D numpy array [n_column, n_channel, acquisition_counter]
     if 'adc_phase_modulation' in siemens_data:
-        adc_phase_modulation = siemens_data['adc_phase_modulation'][10] # fixme: read ADC modulation IDs from the headers (once they are stored there)
+        adc_phase_modulation = siemens_data['adc_phase_modulation']
+        mdh = siemens_data['mdh'];
+        shapeIDs = list();
+        for m in mdh:
+            shapeIDs.append(m.ApplicationCounter)
         print('applying ADC phase modulation')
         data_cha_scan_col=np.transpose(data_unsorted,[1,0,2])
-        n_adc_seg = len(adc_phase_modulation) // data_cha_scan_col.shape[2]
+        n_adc_seg = len(adc_phase_modulation[shapeIDs[0]]) // data_cha_scan_col.shape[2] # FIXME: come up wa better way of getting data/segment sizes
         data_cha_adc_col = np.reshape(data_cha_scan_col,[data_cha_scan_col.shape[0],data_cha_scan_col.shape[1]//n_adc_seg,n_adc_seg*data_cha_scan_col.shape[2]])
         for cha in range(data_cha_adc_col.shape[0]):
             for adc in range(data_cha_adc_col.shape[1]):
-                data_cha_adc_col[cha,adc,:]=data_cha_adc_col[cha,adc,:]*np.exp(1j*adc_phase_modulation)
+                shapeID = shapeIDs[adc*n_adc_seg]
+                data_cha_adc_col[cha,adc,:]=data_cha_adc_col[cha,adc,:]*np.exp(1j*adc_phase_modulation[shapeID])
         data_unsorted=np.transpose(data_cha_adc_col,[1,0,2])
 rec = reconstruct(data_unsorted, seq)
 
